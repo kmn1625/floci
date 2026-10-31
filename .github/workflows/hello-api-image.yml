@@ -1,0 +1,45 @@
+# Publish apps/hello-api to ghcr.io/kmn1625/hello-api for the kubeadm cluster
+# (Argo CD pulls it via k8s/hello-api/overlays/kubeadm). Manual on purpose:
+# publishing a public image is a deliberate release step.
+name: hello-api-image
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Image tag (also baked into the binary), e.g. 0.1.1
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      # Actions pinned to commit SHAs.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683          # v4.2.2
+      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349  # v3.7.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6         # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcd730bb3440c    # v6.9.0
+        with:
+          context: apps/hello-api
+          push: true
+          build-args: VERSION=${{ inputs.version }}
+          tags: ghcr.io/kmn1625/hello-api:${{ inputs.version }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/kmn1625/floci
+            org.opencontainers.image.version=${{ inputs.version }}
+      - name: Digest for the kubeadm overlay
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          echo "ghcr.io/kmn1625/hello-api:${VERSION} → ${DIGEST}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Pin it in k8s/hello-api/overlays/kubeadm/kustomization.yaml (digest: ${DIGEST})" >> "$GITHUB_STEP_SUMMARY"

@@ -26,3 +26,6 @@ __pycache__/
 data/
 out/
 *.log
+
+# Lab VM SSH key, rendered cloud-init, inventory, kubeconfig (vms/up.ps1)
+vms/.keys/

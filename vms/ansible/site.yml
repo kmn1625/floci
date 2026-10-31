@@ -1,0 +1,112 @@
+# kubeadm cluster on the lab VMs. Runs ON the control-plane VM (vms/up.ps1 copies
+# this folder there): VMs on one Hyper-V switch always reach each other, while
+# Docker Desktop's network often cannot reach the Hyper-V switch.
+#
+#   ansible-playbook -i inventory.ini site.yml
+#
+# Idempotent: re-running skips init/join on nodes that already have them.
+
+- name: Nodes are provisioned
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Wait for cloud-init (containerd + kubeadm packages)
+      ansible.builtin.command: cloud-init status --wait
+      changed_when: false
+
+    - name: kubeadm is the pinned version
+      ansible.builtin.command: kubeadm version -o short
+      register: kubeadm_version
+      changed_when: false
+      failed_when: kubeadm_version.stdout != "v" + k8s_version
+
+- name: Control plane
+  hosts: control_plane
+  become: true
+  tasks:
+    - name: kubeadm config
+      ansible.builtin.template:
+        src: kubeadm-config.yaml.j2
+        dest: /etc/kubernetes/kubeadm-config.yaml
+        mode: "0600"
+
+    - name: kubeadm init
+      ansible.builtin.command: kubeadm init --config /etc/kubernetes/kubeadm-config.yaml --upload-certs
+      args:
+        creates: /etc/kubernetes/admin.conf
+
+    - name: kubeconfig for the ubuntu user
+      ansible.builtin.copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/ubuntu/.kube/config
+        remote_src: true
+        owner: ubuntu
+        group: ubuntu
+        mode: "0600"
+
+    - name: Calico (tigera operator) — CNI that enforces NetworkPolicy
+      ansible.builtin.command: >
+        kubectl --kubeconfig /etc/kubernetes/admin.conf create -f
+        https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/tigera-operator.yaml
+      register: tigera
+      changed_when: tigera.rc == 0
+      failed_when: tigera.rc != 0 and 'AlreadyExists' not in tigera.stderr
+
+    - name: Calico installation (pod CIDR {{ pod_cidr }})
+      ansible.builtin.template:
+        src: calico-installation.yaml.j2
+        dest: /etc/kubernetes/calico-installation.yaml
+        mode: "0644"
+
+    - name: Apply Calico installation
+      ansible.builtin.command: kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f /etc/kubernetes/calico-installation.yaml
+      changed_when: false
+
+    - name: Join command for workers
+      ansible.builtin.command: kubeadm token create --print-join-command --ttl 30m
+      register: join_cmd
+      changed_when: false
+
+- name: Workers
+  hosts: workers
+  become: true
+  tasks:
+    - name: kubeadm join
+      ansible.builtin.command: "{{ hostvars[groups['control_plane'][0]].join_cmd.stdout }}"
+      args:
+        creates: /etc/kubernetes/kubelet.conf
+
+- name: Platform (namespaces, RBAC, Argo CD, GitOps root app)
+  hosts: control_plane
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: All nodes Ready
+      ansible.builtin.command: kubectl wait --for=condition=Ready nodes --all --timeout=600s
+      changed_when: false
+
+    - name: argocd namespace
+      ansible.builtin.shell: kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+      changed_when: false
+
+    - name: Argo CD {{ argocd_version }}
+      ansible.builtin.command: >
+        kubectl apply --server-side -n argocd -f
+        https://raw.githubusercontent.com/argoproj/argo-cd/{{ argocd_version }}/manifests/install.yaml
+      changed_when: false
+
+    - name: Argo CD ready
+      ansible.builtin.command: kubectl -n argocd rollout status deploy/argocd-server --timeout=600s
+      changed_when: false
+
+    - name: Root application (app-of-apps) pointing at this public repo
+      ansible.builtin.template:
+        src: root-app.yaml.j2
+        dest: /etc/kubernetes/argocd-root-app.yaml
+        mode: "0644"
+
+    - name: Apply root application
+      ansible.builtin.command: kubectl apply -f /etc/kubernetes/argocd-root-app.yaml
+      changed_when: false

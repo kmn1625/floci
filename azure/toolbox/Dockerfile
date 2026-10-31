@@ -13,6 +13,7 @@ ARG ANSIBLE_CORE_VERSION=2.21.5
 # hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl unzip ca-certificates git openssh-client jq dnsutils dnsmasq socat \
+        postgresql-client redis-tools \
     && rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; cd /tmp; \

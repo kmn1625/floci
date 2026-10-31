@@ -31,6 +31,10 @@ was verified, and what the lab does about it. Re-test the gated ones with
 | F-23 | Event Grid | Topic create returns 200; the provider expects 201 → create fails. | Gated. |
 | F-25 | Key Vault | Secret update (`PATCH .../secrets/<name>/<version>`, e.g. adding tags) returns **405** with an empty body. Create with tags works. | Recreate (`-replace`) when secret metadata changes. |
 | F-26 | ACR | The registry is **anonymous**: push and pull work without credentials, both on the published port and through `<acr>.azurecr.io`; admin credentials from `listCredentials` are never checked. Every ACR shares one `registry:2`, images stored under an `<acr-name>/` prefix. | Push to `localhost:<port>/<acr>/<repo>`; AKS pulls `<acr>.azurecr.io/<repo>` via a k3s mirror with a rewrite. |
+| F-27 | Redis | `non_ssl_port_enabled = false` (ARM reports `enableNonSslPort: false`, `sslPort 6380`), but the Valkey container serves **plaintext on 6379** and nothing on 6380. | Smoke test reports it as a GAP. |
+| F-28 | PostgreSQL | `azurerm_postgresql_flexible_server_database` succeeds, but the database exists **only in ARM** — the real Postgres container has no `app` database (`FATAL: database "app" does not exist`). | Smoke test GAP; create databases with `psql` in app bootstrap. |
+| F-29 | PostgreSQL | `version = "16"` is ignored: the server is `postgres:17-alpine` (**17.11**). | Smoke test GAP. |
+| F-30 | Network exposure | Docker-backed data services are published on **0.0.0.0** of the host (Postgres :52872, MySQL :50633, Redis :6379, ACR :5001) — reachable from the LAN — and firewall rules (`vnet-only` 10.40.0.0/16) are not enforced. Run the lab only on trusted networks / with the host firewall on. | Documented; lab traffic stays on the compose network. |
 | F-24 | Timing | Key Vault ~2m, policy assignment ~1m35s, PostgreSQL ~1m24s per create. | None. |
 
 ## Coverage (Terraform, azurerm 4.81.0, floci-az 0.15.0)

@@ -1,0 +1,52 @@
+#cloud-config
+# Every Kubernetes node (control plane and workers): kernel settings, containerd,
+# and kubeadm/kubelet/kubectl pinned to one patch release. kubeadm itself runs from
+# Ansible (vms/ansible), so this file stays the same for every node.
+#
+# __SSH_PUBLIC_KEY__ is replaced by vms/up.ps1 with the lab key (vms/.keys, gitignored).
+
+package_update: true
+packages:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - gpg
+  - containerd
+  - python3
+
+users:
+  - default
+  - name: ubuntu
+    ssh_authorized_keys:
+      - __SSH_PUBLIC_KEY__
+
+write_files:
+  - path: /etc/modules-load.d/k8s.conf
+    content: |
+      overlay
+      br_netfilter
+  - path: /etc/sysctl.d/99-k8s.conf
+    content: |
+      net.bridge.bridge-nf-call-iptables  = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward                 = 1
+
+runcmd:
+  - swapoff -a
+  - sed -i '/ swap / s/^/#/' /etc/fstab
+  - modprobe overlay
+  - modprobe br_netfilter
+  - sysctl --system
+  # containerd with the systemd cgroup driver (kubelet's default since 1.22)
+  - mkdir -p /etc/containerd
+  - containerd config default > /etc/containerd/config.toml
+  - sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+  - systemctl restart containerd
+  # Kubernetes 1.36 packages, held at 1.36.6 so nodes never drift apart
+  - mkdir -p /etc/apt/keyrings
+  - curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.36/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+  - echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.36/deb/ /' > /etc/apt/sources.list.d/kubernetes.list
+  - apt-get update
+  - apt-get install -y kubelet=1.36.6-1.1 kubeadm=1.36.6-1.1 kubectl=1.36.6-1.1
+  - apt-mark hold kubelet kubeadm kubectl
+  - systemctl enable --now kubelet
