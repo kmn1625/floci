@@ -28,5 +28,17 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - floci-az-data:/app/data
 
+  # On-demand tools container: docker compose run --rm toolbox terraform -chdir=terraform plan
+  toolbox:
+    profiles: ["tools"]
+    build: ./toolbox
+    image: floci-lab-toolbox:local
+    depends_on: [floci-az]
+    working_dir: /work
+    volumes:
+      - ./:/work
+      - toolbox-plugin-cache:/root/.terraform.d/plugin-cache
+
 volumes:
   floci-az-data:
+  toolbox-plugin-cache:
