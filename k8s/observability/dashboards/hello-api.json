@@ -21,7 +21,7 @@
       "id": 2, "type": "stat", "title": "Server errors (5xx)",
       "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "targets": [{"refId": "A", "expr": "100 * sum(rate(http_requests_total{namespace=\"hello\",route!~\"GET /(healthz|readyz|metrics)\",code=~\"5..\"}[$__rate_interval])) / clamp_min(sum(rate(http_requests_total{namespace=\"hello\",route!~\"GET /(healthz|readyz|metrics)\"}[$__rate_interval])), 1e-9)"}],
+      "targets": [{"refId": "A", "expr": "100 * (sum(rate(http_requests_total{namespace=\"hello\",route!~\"GET /(healthz|readyz|metrics)\",code=~\"5..\"}[$__rate_interval])) or vector(0)) / clamp_min(sum(rate(http_requests_total{namespace=\"hello\",route!~\"GET /(healthz|readyz|metrics)\"}[$__rate_interval])), 1e-9)"}],
       "fieldConfig": {"defaults": {"unit": "percent", "decimals": 2, "noValue": "0",
         "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 1}, {"color": "red", "value": 5}]}}, "overrides": []},
       "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
