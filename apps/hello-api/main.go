@@ -1,8 +1,12 @@
-// hello-api: the lab's sample workload. Standard library only.
+// hello-api: the lab's sample workload.
 //
 //	GET /         {"app":"hello-api","version":"...","host":"..."}
 //	GET /healthz  liveness
 //	GET /readyz   readiness (503 while shutting down)
+//	GET /metrics  Prometheus metrics (metrics.go)
+//
+// Traces go to OTLP when OTEL_EXPORTER_OTLP_ENDPOINT is set; access logs are
+// JSON with trace_id (telemetry.go).
 //
 // `hello-api -healthcheck` probes /healthz and exits 0/1 — the image's
 // HEALTHCHECK (distroless has no shell or curl).
@@ -12,7 +16,6 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -56,10 +59,16 @@ func main() {
 		}
 		w.WriteHeader(http.StatusOK)
 	})
+	mux.Handle("GET /metrics", metrics)
+
+	shutdownTracing, err := setupTracing(context.Background())
+	if err != nil {
+		logger.Error("tracing disabled", "error", err.Error())
+	}
 
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           instrument(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
@@ -67,9 +76,10 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("hello-api %s listening on %s", version, addr)
+		logger.Info("listening", "version", version, "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatal(err)
+			logger.Error("server", "error", err.Error())
+			os.Exit(1)
 		}
 	}()
 
@@ -80,8 +90,9 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Printf("shutdown: %v", err)
+		logger.Error("shutdown", "error", err.Error())
 	}
+	_ = shutdownTracing(ctx) // flush buffered spans
 }
 
 func getenv(k, def string) string {

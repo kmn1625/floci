@@ -3,8 +3,9 @@
 
 FROM golang:1.27.3-alpine3.24 AS build
 WORKDIR /src
-COPY go.mod ./
-COPY main.go ./
+COPY go.mod go.sum ./
+RUN go mod download
+COPY *.go ./
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/hello-api .
 

@@ -30,9 +30,10 @@
       changed_when: false
       failed_when: kubeadm_version.stdout != "v" + k8s_version
 
-    - name: containerd is running
-      ansible.builtin.command: systemctl is-active containerd
-      changed_when: false
+    - name: Containerd is running
+      ansible.builtin.systemd_service:
+        name: containerd
+        state: started
 
 - name: Control plane
   hosts: control_plane
@@ -96,6 +97,7 @@
       ansible.builtin.command: kubeadm token create --print-join-command --ttl 30m
       register: join_cmd
       changed_when: false
+      no_log: true  # the join token is a bootstrap credential
 
 - name: Workers
   hosts: workers
@@ -105,6 +107,7 @@
       ansible.builtin.command: "{{ hostvars[groups['control_plane'][0]].join_cmd.stdout }}"
       args:
         creates: /etc/kubernetes/kubelet.conf
+      no_log: true  # the command line carries the join token
 
 - name: Platform (namespaces, RBAC, Argo CD, GitOps root app)
   hosts: control_plane
@@ -116,8 +119,14 @@
       ansible.builtin.command: kubectl wait --for=condition=Ready nodes --all --timeout=600s
       changed_when: false
 
-    - name: argocd namespace
-      ansible.builtin.shell: kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+    - name: Argocd namespace
+      ansible.builtin.command: kubectl apply -f -
+      args:
+        stdin: |
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: argocd
       changed_when: false
 
     - name: Argo CD {{ argocd_version }}

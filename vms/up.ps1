@@ -69,8 +69,14 @@ Invoke-Multipass exec $cp '--' bash -c "cloud-init status --wait >/dev/null; com
 Invoke-Multipass exec $cp '--' bash -c "rm -rf ~/lab && mkdir -p ~/lab ~/.ssh"
 Invoke-Multipass transfer --recursive (Join-Path $here "ansible") "${cp}:lab/"
 Invoke-Multipass transfer $inventory "${cp}:lab/ansible/inventory.ini"
+# The lab private key is on k8s-cp1 only while Ansible runs: left there, anyone who
+# got into the control plane could SSH to every worker.
 Invoke-Multipass transfer $key "${cp}:.ssh/lab_ed25519"
-Invoke-Multipass exec $cp '--' bash -c "chmod 600 ~/.ssh/lab_ed25519 && cd ~/lab/ansible && ANSIBLE_FORCE_COLOR=1 ansible-playbook -i inventory.ini site.yml"
+try {
+  Invoke-Multipass exec $cp '--' bash -c "chmod 600 ~/.ssh/lab_ed25519 && cd ~/lab/ansible && ANSIBLE_FORCE_COLOR=1 ansible-playbook -i inventory.ini site.yml"
+} finally {
+  & $mp exec $cp -- rm -f /home/ubuntu/.ssh/lab_ed25519
+}
 
 # 4. kubeconfig for the host --------------------------------------------------
 $kc = Join-Path $keys "kubeconfig"
