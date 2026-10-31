@@ -1,0 +1,60 @@
+# The workload's own identity: no API access, token not mounted.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hello-api
+  namespace: hello
+automountServiceAccountToken: false
+---
+# Humans: read-only view of the namespace for the "hello-devs" group.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: hello-viewer
+  namespace: hello
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "services", "endpoints", "configmaps", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hello-viewer-devs
+  namespace: hello
+subjects:
+  - kind: Group
+    name: hello-devs
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: hello-viewer
+  apiGroup: rbac.authorization.k8s.io
+---
+# Release automation (Argo CD / CI): may roll the deployment, nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: hello-deployer
+  namespace: hello
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hello-deployer-release
+  namespace: hello
+subjects:
+  - kind: Group
+    name: hello-release
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: hello-deployer
+  apiGroup: rbac.authorization.k8s.io

@@ -37,6 +37,19 @@ blocks every Azure domain from reaching the real cloud (see `azure/FINDINGS.md` 
 36+ resources converge; services the emulator cannot manage yet sit behind
 `-var include_known_emulator_gaps=true`, each tied to a finding.
 
+### App on AKS (from the emulated ACR)
+
+```bash
+docker build -t hello-api:0.1.1 --build-arg VERSION=0.1.1 apps/hello-api
+docker tag hello-api:0.1.1 localhost:5001/<acr-name>/hello-api:0.1.1 && docker push localhost:5001/<acr-name>/hello-api:0.1.1
+bash azure/scripts/aks-connect.sh <acr-name>          # kubeconfig + ACR mirror (F-16, F-26)
+docker compose -f azure/docker-compose.yml run --rm -v "$PWD/k8s:/k8s:ro" toolbox   sh -c 'KUBECONFIG=/work/out/aks.kubeconfig kubectl apply -k /k8s/hello-api/overlays/aks'
+```
+
+`k8s/hello-api` ships a restricted-PSA namespace, a token-less service account, viewer and
+deployer RBAC roles, default-deny NetworkPolicy, PDB and a digest-pinned image. Verified on
+the emulated AKS: rollout healthy, cross-namespace traffic blocked, privileged pods rejected.
+
 ## Azure services in floci-az 0.15.0
 
 Verified from the running emulator's startup banner (2026-10-31). floci-az has no

@@ -1,0 +1,17 @@
+# AKS on floci-az: image from the emulated ACR, pinned by digest.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+images:
+  - name: hello-api
+    newName: acrflocilabm9lr.azurecr.io/hello-api
+    digest: sha256:896f899b2dd80b64b6c9fe8640948d14a0118034479e05c616de9689592f70df
+patches:
+  - target:
+      kind: Deployment
+      name: hello-api
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/env/0/value
+        value: aks
