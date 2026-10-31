@@ -1,0 +1,83 @@
+{
+  "uid": "hello-api-red",
+  "title": "hello-api — RED, logs and traces",
+  "description": "Rate, errors and duration from Prometheus; request logs from Loki; traces from Tempo. Probes and /metrics are excluded. Every query was tested against the lab stack.",
+  "tags": ["floci-lab", "hello-api", "red"],
+  "schemaVersion": 41,
+  "editable": true,
+  "refresh": "30s",
+  "time": {"from": "now-1h", "to": "now"},
+  "templating": {"list": []},
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Request rate",
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "sum(rate(http_requests_total{namespace=\"hello\",route!~\"GET /(healthz|readyz|metrics)\"}[$__rate_interval]))"}],
+      "fieldConfig": {"defaults": {"unit": "reqps", "decimals": 2}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value", "graphMode": "area"}
+    },
+    {
+      "id": 2, "type": "stat", "title": "Server errors (5xx)",
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "100 * sum(rate(http_requests_total{namespace=\"hello\",route!~\"GET /(healthz|readyz|metrics)\",code=~\"5..\"}[$__rate_interval])) / clamp_min(sum(rate(http_requests_total{namespace=\"hello\",route!~\"GET /(healthz|readyz|metrics)\"}[$__rate_interval])), 1e-9)"}],
+      "fieldConfig": {"defaults": {"unit": "percent", "decimals": 2, "noValue": "0",
+        "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 1}, {"color": "red", "value": 5}]}}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+    },
+    {
+      "id": 3, "type": "stat", "title": "Latency p95",
+      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{namespace=\"hello\",route!~\"GET /(healthz|readyz|metrics)\"}[$__rate_interval])))"}],
+      "fieldConfig": {"defaults": {"unit": "s", "decimals": 3,
+        "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.25}, {"color": "red", "value": 0.5}]}}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value", "graphMode": "area"}
+    },
+    {
+      "id": 4, "type": "stat", "title": "Pods up",
+      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "sum(up{namespace=\"hello\", job=\"hello-api\"})"}],
+      "fieldConfig": {"defaults": {"unit": "none", "decimals": 0,
+        "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "orange", "value": 1}, {"color": "green", "value": 2}]}}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Requests by route and status",
+      "gridPos": {"x": 0, "y": 4, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "sum by (route, code) (rate(http_requests_total{namespace=\"hello\",route!~\"GET /(healthz|readyz|metrics)\"}[$__rate_interval]))", "legendFormat": "{{route}} {{code}}"}],
+      "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"drawStyle": "line", "fillOpacity": 10}}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"]}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Latency p50 / p95 / p99",
+      "gridPos": {"x": 12, "y": 4, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket{namespace=\"hello\",route!~\"GET /(healthz|readyz|metrics)\"}[$__rate_interval])))", "legendFormat": "p50"},
+        {"refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{namespace=\"hello\",route!~\"GET /(healthz|readyz|metrics)\"}[$__rate_interval])))", "legendFormat": "p95"},
+        {"refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{namespace=\"hello\",route!~\"GET /(healthz|readyz|metrics)\"}[$__rate_interval])))", "legendFormat": "p99"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 0}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 7, "type": "logs", "title": "Request logs (Loki) — click trace_id to open the trace",
+      "gridPos": {"x": 0, "y": 12, "w": 24, "h": 9},
+      "datasource": {"type": "loki", "uid": "loki"},
+      "targets": [{"refId": "A", "expr": "{namespace=\"hello\", app=\"hello-api\"} |= `\"msg\":\"request\"` | json | route !~ \"GET /(healthz|readyz|metrics)\""}],
+      "options": {"showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true, "prettifyLogMessage": false}
+    },
+    {
+      "id": 8, "type": "table", "title": "Recent traces (Tempo, TraceQL)",
+      "gridPos": {"x": 0, "y": 21, "w": 24, "h": 8},
+      "datasource": {"type": "tempo", "uid": "tempo"},
+      "targets": [{"refId": "A", "queryType": "traceql", "query": "{resource.service.name=\"hello-api\"}", "limit": 20, "tableType": "traces"}],
+      "fieldConfig": {"defaults": {}, "overrides": []},
+      "options": {"showHeader": true}
+    }
+  ]
+}

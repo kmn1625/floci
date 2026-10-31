@@ -157,6 +157,26 @@ spec:
     automated: {prune: true, selfHeal: true}
     syncOptions: [ServerSideApply=true]
 ---
+# Dashboards as code (k8s/observability/dashboards): ConfigMaps the Grafana sidecar loads.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dashboards
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kmn1625/floci.git
+    targetRevision: main
+    path: k8s/observability/dashboards
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

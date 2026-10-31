@@ -1,0 +1,14 @@
+# Dashboards as code: each JSON becomes a ConfigMap with grafana_dashboard: "1",
+# which the Grafana sidecar in kube-prometheus-stack loads (same namespace as Grafana).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: observability
+generatorOptions:
+  disableNameSuffixHash: true
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/part-of: floci-lab
+configMapGenerator:
+  - name: dashboard-hello-api
+    files:
+      - hello-api.json
