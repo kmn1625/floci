@@ -66,13 +66,21 @@
         group: ubuntu
         mode: "0600"
 
-    - name: Calico (tigera operator) — CNI that enforces NetworkPolicy
+    # Calico (tigera operator) — the CNI that enforces NetworkPolicy. Since 3.30 the
+    # operator CRDs ship separately (operator-crds.yaml); server-side apply keeps
+    # re-runs idempotent and avoids the annotation size limit on large CRDs.
+    - name: Calico operator CRDs + operator
       ansible.builtin.command: >
-        kubectl --kubeconfig /etc/kubernetes/admin.conf create -f
-        https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/tigera-operator.yaml
-      register: tigera
-      changed_when: tigera.rc == 0
-      failed_when: tigera.rc != 0 and 'AlreadyExists' not in tigera.stderr
+        kubectl --kubeconfig /etc/kubernetes/admin.conf apply --server-side --force-conflicts -f
+        https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/{{ item }}
+      loop: [operator-crds.yaml, tigera-operator.yaml]
+      changed_when: false
+
+    - name: Calico CRDs established
+      ansible.builtin.command: >
+        kubectl --kubeconfig /etc/kubernetes/admin.conf wait --for=condition=Established --timeout=120s
+        crd/installations.operator.tigera.io crd/apiservers.operator.tigera.io
+      changed_when: false
 
     - name: Calico installation (pod CIDR {{ pod_cidr }})
       ansible.builtin.template:
