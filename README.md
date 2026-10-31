@@ -50,6 +50,24 @@ docker compose -f azure/docker-compose.yml run --rm -v "$PWD/k8s:/k8s:ro" toolbo
 deployer RBAC roles, default-deny NetworkPolicy, PDB and a digest-pinned image. Verified on
 the emulated AKS: rollout healthy, cross-namespace traffic blocked, privileged pods rejected.
 
+## Real Kubernetes on VMs (kubeadm + Argo CD)
+
+Windows 11 Pro with Hyper-V and Multipass (`winget install Canonical.Multipass`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File vms/up.ps1
+$env:KUBECONFIG = "vms/.keys/kubeconfig"; kubectl get nodes
+kubectl -n argocd port-forward svc/argocd-server 8443:443        # https://localhost:8443, user admin
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}'   # base64
+```
+
+3 Ubuntu 24.04 VMs; cloud-init installs containerd and kubeadm/kubelet/kubectl 1.36.6; Ansible (run on
+the control plane) does `kubeadm init`, Calico v3.33.0, worker join and Argo CD v3.5.6. Argo CD's root app
+syncs `k8s/argocd/apps` from this repo: `platform` (namespaces, cluster RBAC, quota, limits, default-deny)
+and `hello-api` (image `ghcr.io/kmn1625/hello-api` by digest). Verified: all Synced/Healthy, NetworkPolicy
+blocks other namespaces, RBAC roles behave, restricted PSA rejects privileged pods, deleted resources self-heal.
+After a laptop restart the VMs start with Multipass; for the Azure emulator run `bash azure/scripts/recover-after-restart.sh`.
+
 ## Azure services in floci-az 0.15.0
 
 Verified from the running emulator's startup banner (2026-10-31). floci-az has no
