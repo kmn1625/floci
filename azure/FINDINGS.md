@@ -19,4 +19,20 @@ was verified, and what the lab does about it. Re-test the gated ones with
 | F-10 | Storage | Account PATCH drops `tags`. | `ignore_changes`. |
 | F-11 | Key Vault | Vault create takes ~2m11s (provider polls a status the emulator does not settle quickly). | None; noted. |
 | F-12 | Web UI | `/_floci/ui` returns 404 on 0.15.0 (README Quick Start says a console exists; Non-Goals say API-only). | Use the API / this lab. |
-| F-13 | AKS | Uses `rancher/k3s:latest` (unpinned) for clusters. | To pin via config when AKS is added. |
+| F-14 | ARM (generic) | `PUT` returns **404 ResourceNotFound** for every provider without a dedicated handler, even ones the startup banner lists as enabled: `Microsoft.AppConfiguration`, `Microsoft.ServiceBus`, `Microsoft.EventHub`, `Microsoft.DocumentDB` (Cosmos), `Microsoft.SignalRService`, `Microsoft.Web/serverFarms`, `Microsoft.Insights/actionGroups` (also `Microsoft.Contoso/widgets`). Their data planes exist; their management planes do not. | Gated. |
+| F-15 | API Management | Create works but drops `tags`; any update (`PATCH`) returns **405 Method Not Allowed**. | `ignore_changes = [tags]`. |
+| F-16 | AKS | GET has no `sku` → azurerm cannot read or import the cluster ("SKU information is missing"). `provisioningState` stays `Creating`; requested pool name is ignored (`nodepool1`); Kubernetes 1.29 on unpinned `rancher/k3s:latest`. The k3s container itself runs. | Gated in Terraform; cluster created and used via `scripts/aks.sh` (ARM REST + kubeconfig). |
+| F-17 | RBAC | `GET roleDefinitions` returns no `value`; `PUT .../providers/Microsoft.Authorization/roleAssignments/<id>` under a resource scope returns 404 ("Unknown ACR path"). Built-in roles such as `Key Vault Secrets User`, `AcrPull` cannot be resolved. | Gated. |
+| F-18 | Azure SQL | Server create works, but every read lists `restorableDroppedDatabases`, which is not implemented → server cannot be managed or imported. | Gated. |
+| F-19 | Communication Services | Create works; read calls `listKeys`, not implemented. (Email Communication Service works.) | Gated. |
+| F-20 | Redis | Reports `redisVersion 7.0` (Valkey 8 backend); provider default is `6` → perpetual update. | `ignore_changes`. |
+| F-21 | Virtual machines (mocked) | Drops `tags` and `additional_capabilities`. | `ignore_changes`. |
+| F-22 | MySQL flexible server | Response lacks `properties.storage` → **azurerm 4.81.0 panics** (nil pointer in `flattenArmServerStorage`, `mysql_flexible_server_resource.go:1028`). Provider bug (missing nil check) triggered by an incomplete emulator response; the crash aborts every in-flight create and leaves orphans in the emulator. The MySQL container does start. | Gated. Report upstream to both projects. |
+| F-23 | Event Grid | Topic create returns 200; the provider expects 201 → create fails. | Gated. |
+| F-24 | Timing | Key Vault ~2m, policy assignment ~1m35s, PostgreSQL ~1m24s per create. | None. |
+
+## Coverage (Terraform, azurerm 4.81.0, floci-az 0.15.0)
+
+| Managed by Terraform and converging (36 resources) | Gated (`include_known_emulator_gaps`) |
+|---|---|
+| Resource group; VNet, 4 subnets, NSG + association, public IP, NIC, private DNS zone + link; user-assigned identity; storage account, blob container, queue; Key Vault, secret, key; ACR; PostgreSQL flexible server + database + firewall rule; Redis; Container Apps environment + app; ACI container group; API Management; Linux VM (mocked); Email Communication Service; Policy definition + RG assignment | Log Analytics (F-02); storage table (F-08); AKS + node pool (F-16); role assignments (F-17); Cosmos DB, Service Bus, Event Hubs, App Configuration, SignalR, App Service plan + Function app, action group (F-14); Azure SQL (F-18); Communication Service (F-19); MySQL (F-22); Event Grid (F-23) |
