@@ -27,6 +27,8 @@ docker exec "$aks" cat /etc/rancher/k3s/k3s.yaml \
         -e "s#: default\$#: aks-floci#" \
   > "$here/out/aks.kubeconfig"
 echo "wrote out/aks.kubeconfig (server https://${aks}:6443)"
+# k3s pins its node IP; recover-after-restart.sh reattaches the container at this address.
+docker inspect "$aks" --format '{{(index .NetworkSettings.Networks "azure_default").IPAddress}}' > "$here/out/aks.ip"
 
 # 2. <acr>.azurecr.io/<repo> -> http://<registry>:5000/<acr>/<repo> (floci-az stores each
 #    registry's images under an <acr>/ prefix in one shared registry:2).

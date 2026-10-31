@@ -35,6 +35,7 @@ was verified, and what the lab does about it. Re-test the gated ones with
 | F-28 | PostgreSQL | `azurerm_postgresql_flexible_server_database` succeeds, but the database exists **only in ARM** — the real Postgres container has no `app` database (`FATAL: database "app" does not exist`). | Smoke test GAP; create databases with `psql` in app bootstrap. |
 | F-29 | PostgreSQL | `version = "16"` is ignored: the server is `postgres:17-alpine` (**17.11**). | Smoke test GAP. |
 | F-30 | Network exposure | Docker-backed data services are published on **0.0.0.0** of the host (Postgres :52872, MySQL :50633, Redis :6379, ACR :5001) — reachable from the LAN — and firewall rules (`vnet-only` 10.40.0.0/16) are not enforced. Run the lab only on trusted networks / with the host firewall on. | Documented; lab traffic stays on the compose network. |
+| F-31 | Restarts | After a host/Docker restart floci-az returns (compose `restart: unless-stopped`) but every container it launched (ACR registry, AKS k3s, Postgres, MySQL, Redis) stays **Exited** while ARM still lists the resources. Restarted by hand, the k3s node exits with `failed to find interface with specified node ip`: Docker gave it a new address. | `scripts/recover-after-restart.sh` restarts them and reattaches AKS at its recorded IP. |
 | F-24 | Timing | Key Vault ~2m, policy assignment ~1m35s, PostgreSQL ~1m24s per create. | None. |
 
 ## Coverage (Terraform, azurerm 4.81.0, floci-az 0.15.0)

@@ -32,7 +32,7 @@ $cp = "k8s-cp1"
 $mp = (Get-Command multipass -ErrorAction SilentlyContinue).Source
 if (-not $mp) { $mp = "$env:ProgramFiles\Multipass\bin\multipass.exe" }
 if (-not (Test-Path $mp)) { throw "Multipass not found. Install: winget install Canonical.Multipass (needs Hyper-V + reboot)." }
-function mp { & $mp @args; if ($LASTEXITCODE -ne 0) { throw "multipass $($args -join ' ') failed ($LASTEXITCODE)" } }
+function Invoke-Multipass { & $mp @args; if ($LASTEXITCODE -ne 0) { throw "multipass $($args -join ' ') failed ($LASTEXITCODE)" } }
 
 # 1. key + cloud-init ---------------------------------------------------------
 New-Item -ItemType Directory -Force $keys | Out-Null
@@ -52,7 +52,7 @@ $nodes = @(@{ name = $cp; mem = $CpMemory }) + ($Workers | ForEach-Object { @{ n
 foreach ($n in $nodes) {
   if ($existing -contains $n.name) { Write-Host "[keep]   $($n.name)"; continue }
   Write-Host "[launch] $($n.name) ($Cpus CPU, $($n.mem), $Disk)"
-  mp launch $Image --name $n.name --cpus $Cpus --memory $n.mem --disk $Disk --cloud-init $cloudInit --timeout 1200
+  Invoke-Multipass launch $Image --name $n.name --cpus $Cpus --memory $n.mem --disk $Disk --cloud-init $cloudInit --timeout 1200
 }
 
 $info = (& $mp info --format json ($nodes | ForEach-Object { $_.name }) | ConvertFrom-Json).info
@@ -65,12 +65,12 @@ $inventory = Join-Path $keys "inventory.ini"
 $inv -join "`n" | Set-Content -NoNewline -Encoding ascii $inventory
 Write-Host ("[nodes]  " + (($nodes | ForEach-Object { "$($_.name)=$(ip $_.name)" }) -join "  "))
 
-mp exec $cp -- bash -c "cloud-init status --wait >/dev/null; command -v ansible-playbook >/dev/null || sudo apt-get install -y -qq ansible-core >/dev/null"
-mp exec $cp -- bash -c "rm -rf ~/lab && mkdir -p ~/lab ~/.ssh"
-mp transfer --recursive (Join-Path $here "ansible") "${cp}:lab/"
-mp transfer $inventory "${cp}:lab/ansible/inventory.ini"
-mp transfer $key "${cp}:.ssh/lab_ed25519"
-mp exec $cp -- bash -c "chmod 600 ~/.ssh/lab_ed25519 && cd ~/lab/ansible && ANSIBLE_FORCE_COLOR=1 ansible-playbook -i inventory.ini site.yml"
+Invoke-Multipass exec $cp -- bash -c "cloud-init status --wait >/dev/null; command -v ansible-playbook >/dev/null || sudo apt-get install -y -qq ansible-core >/dev/null"
+Invoke-Multipass exec $cp -- bash -c "rm -rf ~/lab && mkdir -p ~/lab ~/.ssh"
+Invoke-Multipass transfer --recursive (Join-Path $here "ansible") "${cp}:lab/"
+Invoke-Multipass transfer $inventory "${cp}:lab/ansible/inventory.ini"
+Invoke-Multipass transfer $key "${cp}:.ssh/lab_ed25519"
+Invoke-Multipass exec $cp -- bash -c "chmod 600 ~/.ssh/lab_ed25519 && cd ~/lab/ansible && ANSIBLE_FORCE_COLOR=1 ansible-playbook -i inventory.ini site.yml"
 
 # 4. kubeconfig for the host --------------------------------------------------
 $kc = Join-Path $keys "kubeconfig"
