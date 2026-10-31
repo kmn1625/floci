@@ -104,6 +104,10 @@ spec:
         singleBinary:
           replicas: 1
           persistence: {enabled: false}
+          # with persistence off, chart 7.5.0 mounts nothing at /var/loki and the root
+          # filesystem is read-only -> "mkdir /var/loki: read-only file system"
+          extraVolumes: [{name: loki-data, emptyDir: {}}]
+          extraVolumeMounts: [{name: loki-data, mountPath: /var/loki}]
           resources: {requests: {cpu: 50m, memory: 192Mi}, limits: {memory: 512Mi}}
         read: {replicas: 0}
         write: {replicas: 0}
