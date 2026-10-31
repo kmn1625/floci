@@ -68,6 +68,22 @@ and `hello-api` (image `ghcr.io/kmn1625/hello-api` by digest). Verified: all Syn
 blocks other namespaces, RBAC roles behave, restricted PSA rejects privileged pods, deleted resources self-heal.
 After a laptop restart the VMs start with Multipass; for the Azure emulator run `bash azure/scripts/recover-after-restart.sh`.
 
+## Observability (on the kubeadm cluster)
+
+Argo CD installs from pinned Helm charts (`k8s/argocd/apps/observability.yaml`): kube-prometheus-stack 92.16.1
+(Prometheus, Alertmanager, Grafana, node-exporter, kube-state-metrics), Loki 7.5.0, Tempo 1.24.4 and Grafana
+Alloy 1.15.0 (pod logs through the Kubernetes API). `hello-api` 0.2.0 exposes `/metrics`, sends OpenTelemetry
+traces to Tempo and writes JSON logs with `trace_id`, so Grafana jumps from a log line to its trace.
+
+```powershell
+kubectl -n observability port-forward svc/kps-grafana 3000:80     # http://localhost:3000, user admin
+kubectl -n observability get secret kps-grafana -o jsonpath='{.data.admin-password}'   # base64
+```
+
+Verified 31 Oct 2026: every Prometheus target up (hello-api, kubelet, node-exporter, API server, CoreDNS...),
+Grafana datasources Prometheus, Loki and Tempo healthy, app logs in Loki, a log's `trace_id` opens its trace in
+Tempo. The stack needs 3 GB workers; on a 4-core laptop pause the Floci emulators while it runs.
+
 ## Azure services in floci-az 0.15.0
 
 Verified from the running emulator's startup banner (2026-10-31). floci-az has no
