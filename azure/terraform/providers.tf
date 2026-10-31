@@ -17,5 +17,6 @@ provider "azurerm" {
   subscription_id = "00000000-0000-0000-0000-000000000001"
   tenant_id       = "00000000-0000-0000-0000-000000000002"
   client_id       = "00000000-0000-0000-0000-000000000003"
-  client_secret   = "floci-az-does-not-validate-this"
+  # client_secret comes from ARM_CLIENT_SECRET (set on the toolbox service) —
+  # never a literal in HCL, even for an emulator that does not validate it.
 }

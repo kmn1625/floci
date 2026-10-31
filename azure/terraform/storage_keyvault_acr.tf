@@ -1,5 +1,6 @@
 # ── Storage (blob, queue, table) ────────────────────────────────────────────
 resource "azurerm_storage_account" "lab" {
+  #checkov:skip=CKV2_AZURE_1:Emulator lab; customer-managed keys need a CMK + identity wiring floci-az does not model
   name                            = "st${var.prefix}${random_string.suffix.result}"
   location                        = azurerm_resource_group.lab.location
   resource_group_name             = azurerm_resource_group.lab.name
@@ -24,6 +25,7 @@ resource "azurerm_storage_account" "lab" {
 # storage_account_name = data-plane API (via the toolbox egress guard). The ARM path
 # (storage_account_id) fails: floci-az answers 200 for a container that does not exist (F-03).
 resource "azurerm_storage_container" "artifacts" {
+  #checkov:skip=CKV2_AZURE_21:Blob read logging needs Log Analytics, which floci-az cannot create (F-02)
   name                  = "artifacts"
   storage_account_name  = azurerm_storage_account.lab.name
   container_access_type = "private"
@@ -76,6 +78,7 @@ resource "azurerm_key_vault_secret" "db_password" {
   value        = random_password.db.result
   key_vault_id = azurerm_key_vault.lab.id
   content_type = "password"
+  tags         = local.tags
 }
 
 resource "azurerm_key_vault_key" "app" {
@@ -84,6 +87,7 @@ resource "azurerm_key_vault_key" "app" {
   key_type     = "RSA"
   key_size     = 2048
   key_opts     = ["sign", "verify"]
+  tags         = local.tags
 }
 
 # ── Container registry ──────────────────────────────────────────────────────

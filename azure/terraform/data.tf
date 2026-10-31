@@ -94,6 +94,7 @@ resource "azurerm_mysql_flexible_database" "app" {
 
 # ── Azure SQL (management plane on floci-az) ────────────────────────────────
 resource "azurerm_mssql_server" "lab" {
+  #checkov:skip=CKV_AZURE_24:Gated resource (F-18); auditing needs a storage/Log Analytics sink
   count                        = var.include_known_emulator_gaps ? 1 : 0 # FINDINGS.md F-18
   name                         = "sql-${var.prefix}-${random_string.suffix.result}"
   location                     = azurerm_resource_group.lab.location

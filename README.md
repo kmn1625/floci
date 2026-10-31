@@ -21,6 +21,22 @@ curl -s http://localhost:4566/_floci/health
 Needs Docker Desktop (or any Docker engine). Both emulators start Docker-backed
 services (Kubernetes, registries, databases) through the mounted Docker socket.
 
+## Run the Azure lab
+
+```bash
+cd azure
+docker compose up -d                                   # floci-az
+docker compose --profile tools build toolbox           # pinned terraform/kubectl/helm/ansible
+docker compose run --rm toolbox terraform -chdir=terraform init
+docker compose run --rm toolbox terraform -chdir=terraform plan -out=tfplan
+docker compose run --rm toolbox terraform -chdir=terraform apply tfplan
+```
+
+Everything runs in the toolbox container: it trusts the emulator's TLS certificate and
+blocks every Azure domain from reaching the real cloud (see `azure/FINDINGS.md` F-01).
+36+ resources converge; services the emulator cannot manage yet sit behind
+`-var include_known_emulator_gaps=true`, each tied to a finding.
+
 ## Azure services in floci-az 0.15.0
 
 Verified from the running emulator's startup banner (2026-10-31). floci-az has no

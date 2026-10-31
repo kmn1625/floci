@@ -29,6 +29,7 @@ was verified, and what the lab does about it. Re-test the gated ones with
 | F-21 | Virtual machines (mocked) | Drops `tags` and `additional_capabilities`. | `ignore_changes`. |
 | F-22 | MySQL flexible server | Response lacks `properties.storage` → **azurerm 4.81.0 panics** (nil pointer in `flattenArmServerStorage`, `mysql_flexible_server_resource.go:1028`). Provider bug (missing nil check) triggered by an incomplete emulator response; the crash aborts every in-flight create and leaves orphans in the emulator. The MySQL container does start. | Gated. Report upstream to both projects. |
 | F-23 | Event Grid | Topic create returns 200; the provider expects 201 → create fails. | Gated. |
+| F-25 | Key Vault | Secret update (`PATCH .../secrets/<name>/<version>`, e.g. adding tags) returns **405** with an empty body. Create with tags works. | Recreate (`-replace`) when secret metadata changes. |
 | F-24 | Timing | Key Vault ~2m, policy assignment ~1m35s, PostgreSQL ~1m24s per create. | None. |
 
 ## Coverage (Terraform, azurerm 4.81.0, floci-az 0.15.0)

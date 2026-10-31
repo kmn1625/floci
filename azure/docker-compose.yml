@@ -35,6 +35,9 @@ services:
     image: floci-lab-toolbox:local
     depends_on: [floci-az]
     working_dir: /work
+    environment:
+      # floci-az does not validate credentials; kept out of HCL so no literal secret is committed.
+      ARM_CLIENT_SECRET: floci-az-local
     volumes:
       - ./:/work
       - toolbox-plugin-cache:/root/.terraform.d/plugin-cache

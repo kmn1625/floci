@@ -43,6 +43,20 @@ resource "azurerm_network_security_group" "vms" {
   }
 }
 
+# Every subnet gets an NSG (CKV2_AZURE_31). aks/apps/data use Azure's default rules.
+resource "azurerm_network_security_group" "default" {
+  name                = "nsg-${var.prefix}-default"
+  location            = azurerm_resource_group.lab.location
+  resource_group_name = azurerm_resource_group.lab.name
+  tags                = local.tags
+}
+
+resource "azurerm_subnet_network_security_group_association" "default" {
+  for_each                  = toset(["aks", "apps", "data"])
+  subnet_id                 = azurerm_subnet.this[each.key].id
+  network_security_group_id = azurerm_network_security_group.default.id
+}
+
 resource "azurerm_subnet_network_security_group_association" "vms" {
   subnet_id                 = azurerm_subnet.this["vms"].id
   network_security_group_id = azurerm_network_security_group.vms.id

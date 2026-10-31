@@ -6,8 +6,9 @@ resource "azurerm_policy_definition" "require_owner_tag" {
   display_name = "Require an Owner tag"
 
   policy_rule = jsonencode({
-    if   = { field = "tags['Owner']", exists = "false" }
-    then = { effect = "deny" }
+    # Quoted keys: checkov's HCL parser cannot read bare `if`/`then` and skips the file.
+    "if"   = { field = "tags['Owner']", exists = "false" }
+    "then" = { effect = "deny" }
   })
 }
 
