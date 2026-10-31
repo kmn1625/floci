@@ -1,0 +1,48 @@
+# AWS lab on Floci 2.3.0 (local AWS emulator, 46 services) — port 4566, console /_floci/ui.
+#
+#   docker compose -f aws/lab/docker-compose.yml up -d
+#   docker compose -f aws/lab/docker-compose.yml --profile tools run --rm toolbox terraform -chdir=terraform plan
+#
+# The older pinned harness (aws/docker-compose.yml, Floci 1.5.15, container `floci`) also uses
+# :4566 — run one or the other.
+services:
+  floci-lab:
+    image: floci/floci:2.3.0
+    container_name: floci-lab
+    restart: unless-stopped
+    user: root  # needs the Docker socket for Lambda, EKS (k3s), RDS, ElastiCache, EC2, ECR
+    ports:
+      - "4566:4566"
+    environment:
+      AWS_DEFAULT_REGION: us-east-1
+      FLOCI_HOSTNAME: floci-lab  # URLs Floci returns (SQS queue URLs, ...) use the compose name
+      FLOCI_STORAGE_MODE: hybrid
+      FLOCI_STORAGE_PERSISTENT_PATH: /var/lib/floci
+      # 1.x settings kept for the harness; verified separately on 2.x (FINDINGS.md)
+      FLOCI_SERVICES_IAM_ENFORCEMENT_ENABLED: "true"
+      FLOCI_AUTH_VALIDATE_SIGNATURES: "true"
+      FLOCI_SERVICES_IAM_SEED_DEPLOYER_PRINCIPAL: "true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - floci-lab-data:/var/lib/floci
+
+  toolbox:
+    profiles: ["tools"]
+    build: ../../toolbox
+    image: floci-lab-toolbox:local
+    depends_on: [floci-lab]
+    working_dir: /work
+    environment:
+      CLOUD: aws
+      AWS_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: floci  # Floci 2.x seeded deployer user floci-deployer (not a real key; 1.x used fake-agent-key-001)
+      AWS_SECRET_ACCESS_KEY: floci
+      AWS_ENDPOINT_URL: http://floci-lab:4566  # SDKs and the AWS CLI use this for every service
+    volumes:
+      - ./:/work
+      - toolbox-plugin-cache:/root/.terraform.d/plugin-cache
+
+volumes:
+  floci-lab-data:
+  toolbox-plugin-cache:

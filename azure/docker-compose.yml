@@ -31,7 +31,7 @@ services:
   # On-demand tools container: docker compose run --rm toolbox terraform -chdir=terraform plan
   toolbox:
     profiles: ["tools"]
-    build: ./toolbox
+    build: ../toolbox
     image: floci-lab-toolbox:local
     depends_on: [floci-az]
     working_dir: /work
