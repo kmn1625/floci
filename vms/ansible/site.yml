@@ -11,15 +11,28 @@
   become: true
   gather_facts: false
   tasks:
+    # Wait for cloud-init to finish, but judge the node by what Kubernetes needs: a
+    # failing unrelated module (e.g. timezone) makes cloud-init report "error".
     - name: Wait for cloud-init (containerd + kubeadm packages)
-      ansible.builtin.command: cloud-init status --wait
+      ansible.builtin.command: cloud-init status --wait --long
+      register: cloud_init
       changed_when: false
+      failed_when: false
+
+    - name: Report cloud-init errors
+      ansible.builtin.debug:
+        msg: "{{ cloud_init.stdout_lines | select('search', 'error|Invalid|failed') | list }}"
+      when: cloud_init.rc != 0
 
     - name: kubeadm is the pinned version
       ansible.builtin.command: kubeadm version -o short
       register: kubeadm_version
       changed_when: false
       failed_when: kubeadm_version.stdout != "v" + k8s_version
+
+    - name: containerd is running
+      ansible.builtin.command: systemctl is-active containerd
+      changed_when: false
 
 - name: Control plane
   hosts: control_plane
@@ -35,6 +48,14 @@
       ansible.builtin.command: kubeadm init --config /etc/kubernetes/kubeadm-config.yaml --upload-certs
       args:
         creates: /etc/kubernetes/admin.conf
+
+    - name: ~/.kube for the ubuntu user
+      ansible.builtin.file:
+        path: /home/ubuntu/.kube
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: "0700"
 
     - name: kubeconfig for the ubuntu user
       ansible.builtin.copy:

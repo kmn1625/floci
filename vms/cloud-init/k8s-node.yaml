@@ -5,6 +5,10 @@
 #
 # __SSH_PUBLIC_KEY__ is replaced by vms/up.ps1 with the lab key (vms/.keys, gitignored).
 
+# Multipass forwards the Windows host time zone (e.g. "Asia/Calcutta", a legacy alias
+# Ubuntu 24.04 no longer ships), which fails cloud-init's timezone module. Pin UTC.
+timezone: Etc/UTC
+
 package_update: true
 packages:
   - apt-transport-https

@@ -65,12 +65,12 @@ $inventory = Join-Path $keys "inventory.ini"
 $inv -join "`n" | Set-Content -NoNewline -Encoding ascii $inventory
 Write-Host ("[nodes]  " + (($nodes | ForEach-Object { "$($_.name)=$(ip $_.name)" }) -join "  "))
 
-Invoke-Multipass exec $cp -- bash -c "cloud-init status --wait >/dev/null; command -v ansible-playbook >/dev/null || sudo apt-get install -y -qq ansible-core >/dev/null"
-Invoke-Multipass exec $cp -- bash -c "rm -rf ~/lab && mkdir -p ~/lab ~/.ssh"
+Invoke-Multipass exec $cp '--' bash -c "cloud-init status --wait >/dev/null; command -v ansible-playbook >/dev/null || sudo apt-get install -y -qq ansible-core >/dev/null"
+Invoke-Multipass exec $cp '--' bash -c "rm -rf ~/lab && mkdir -p ~/lab ~/.ssh"
 Invoke-Multipass transfer --recursive (Join-Path $here "ansible") "${cp}:lab/"
 Invoke-Multipass transfer $inventory "${cp}:lab/ansible/inventory.ini"
 Invoke-Multipass transfer $key "${cp}:.ssh/lab_ed25519"
-Invoke-Multipass exec $cp -- bash -c "chmod 600 ~/.ssh/lab_ed25519 && cd ~/lab/ansible && ANSIBLE_FORCE_COLOR=1 ansible-playbook -i inventory.ini site.yml"
+Invoke-Multipass exec $cp '--' bash -c "chmod 600 ~/.ssh/lab_ed25519 && cd ~/lab/ansible && ANSIBLE_FORCE_COLOR=1 ansible-playbook -i inventory.ini site.yml"
 
 # 4. kubeconfig for the host --------------------------------------------------
 $kc = Join-Path $keys "kubeconfig"
