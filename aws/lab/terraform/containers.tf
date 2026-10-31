@@ -63,8 +63,33 @@ resource "aws_eks_cluster" "lab" {
     }
   }
 
+  # Access entries, not the aws-auth ConfigMap: Floci's token webhook only reads access entries,
+  # so in CONFIG_MAP mode every token is rejected (FINDINGS A-15). The mode is fixed at creation
+  # (Floci lacks UpdateClusterConfig, A-16); changing the bootstrap flag replaces the cluster.
+  access_config {
+    authentication_mode                         = "API"
+    bootstrap_cluster_creator_admin_permissions = true
+  }
+
   enabled_cluster_log_types = ["api", "audit", "authenticator"]
   depends_on                = [aws_iam_role_policy_attachment.eks_cluster]
+}
+
+# Cluster admin granted explicitly: Floci does not create the bootstrap creator entry (A-17),
+# and on AWS an explicit entry keeps admin access independent of who ran apply.
+resource "aws_eks_access_entry" "admin" {
+  cluster_name  = aws_eks_cluster.lab.name
+  principal_arn = data.aws_caller_identity.current.arn
+}
+
+resource "aws_eks_access_policy_association" "admin" {
+  count         = var.include_known_emulator_gaps ? 1 : 0 # AssociateAccessPolicy not implemented (A-18)
+  cluster_name  = aws_eks_cluster.lab.name
+  principal_arn = aws_eks_access_entry.admin.principal_arn
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+  access_scope {
+    type = "cluster"
+  }
 }
 
 data "aws_iam_policy_document" "node_assume" {

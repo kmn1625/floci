@@ -1,0 +1,19 @@
+# EKS on Floci (k3s): image from the emulated ECR, pinned by digest. The k3s node mirrors
+# <account>.dkr.ecr.<region>.localhost:4566 to Floci, so the real repository URL pulls as-is.
+# Push with aws/lab/scripts/ecr-push.sh.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+images:
+  - name: hello-api
+    newName: 000000000000.dkr.ecr.us-east-1.localhost:4566/flocilab/hello-api
+    digest: sha256:06a03e3721de009766ee788296f23c7438547f73406f8f852eacf1bf8aa279f9 # 0.2.0
+patches:
+  - target:
+      kind: Deployment
+      name: hello-api
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/env/0/value
+        value: eks

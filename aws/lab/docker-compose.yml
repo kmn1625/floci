@@ -41,6 +41,7 @@ services:
       AWS_ENDPOINT_URL: http://floci-lab:4566  # SDKs and the AWS CLI use this for every service
     volumes:
       - ./:/work
+      - ../../k8s:/k8s:ro  # shared manifests (hello-api overlays)
       - toolbox-plugin-cache:/root/.terraform.d/plugin-cache
 
 volumes:
