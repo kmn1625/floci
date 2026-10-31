@@ -4,10 +4,11 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - ../../base
+  - observability.yaml
 images:
   - name: hello-api
     newName: ghcr.io/kmn1625/hello-api
-    digest: sha256:4fd7a6c768d26d3514006c0a10fd473c79907dbb9a7d52df90b54e4c56db6ffa # 0.1.1
+    digest: sha256:06a03e3721de009766ee788296f23c7438547f73406f8f852eacf1bf8aa279f9 # 0.2.0 (metrics, traces, JSON logs)
 patches:
   - target:
       kind: Deployment
@@ -16,3 +17,12 @@ patches:
       - op: replace
         path: /spec/template/spec/containers/0/env/0/value
         value: kubeadm
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://tempo.observability:4318"}
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: {name: OTEL_SERVICE_NAME, value: hello-api}
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: {name: OTEL_RESOURCE_ATTRIBUTES, value: "deployment.environment=kubeadm-lab"}

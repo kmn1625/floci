@@ -19,6 +19,17 @@ metadata:
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/warn: restricted
 ---
+# Prometheus, Grafana, Loki, Tempo, Alloy. Privileged only because node-exporter
+# reads host metrics (hostNetwork, hostPID); workloads elsewhere stay restricted.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+  labels:
+    app.kubernetes.io/part-of: floci-lab
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: baseline
+---
 # ── Cluster RBAC (groups come from the identity provider / client certs) ─────
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

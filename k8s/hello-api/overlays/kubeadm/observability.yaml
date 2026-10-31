@@ -1,0 +1,49 @@
+# Observability wiring for hello-api on the kubeadm cluster (kube-prometheus-stack, Tempo).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: hello-api
+  namespace: hello
+  annotations:
+    # the CRD arrives with kube-prometheus-stack; don't fail the dry run before it exists
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  selector:
+    matchLabels:
+      app: hello-api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+---
+# The namespace is default-deny: let Prometheus scrape in, and traces out to Tempo.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hello-api-observability
+  namespace: hello
+spec:
+  podSelector:
+    matchLabels:
+      app: hello-api
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 8080
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: tempo
+      ports:
+        - port: 4318

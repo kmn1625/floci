@@ -148,3 +148,14 @@
     - name: Apply root application
       ansible.builtin.command: kubectl apply -f /etc/kubernetes/argocd-root-app.yaml
       changed_when: false
+
+# Last: the lab private key was copied here only so this run could reach the
+# workers. up.ps1 also removes it, but a hung `multipass exec` skips that.
+- name: Remove the lab key from the control plane
+  hosts: control_plane
+  gather_facts: false
+  tasks:
+    - name: Lab private key is gone
+      ansible.builtin.file:
+        path: /home/ubuntu/.ssh/lab_ed25519
+        state: absent

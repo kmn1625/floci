@@ -1,0 +1,212 @@
+# Observability stack, synced by Argo CD from the upstream Helm charts (pinned).
+#   metrics: kube-prometheus-stack (Prometheus, Alertmanager, Grafana, node-exporter, kube-state-metrics)
+#   logs:    Loki (single binary) <- Grafana Alloy (reads pod logs through the Kubernetes API)
+#   traces:  Tempo (monolithic)   <- apps send OTLP/HTTP to tempo.observability:4318
+# Lab sizing: no persistent volumes (emptyDir), short retention.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 92.16.1
+    helm:
+      releaseName: kps
+      valuesObject:
+        fullnameOverride: kps
+        # kubeadm binds these to 127.0.0.1 on the nodes: scraping them only shows DOWN targets.
+        kubeEtcd: {enabled: false}
+        kubeControllerManager: {enabled: false}
+        kubeScheduler: {enabled: false}
+        kubeProxy: {enabled: false}
+        alertmanager:
+          alertmanagerSpec:
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 64Mi}}
+        prometheus:
+          prometheusSpec:
+            retention: 2d
+            # pick up ServiceMonitors/PodMonitors from every namespace, not only this release's
+            serviceMonitorSelectorNilUsesHelmValues: false
+            podMonitorSelectorNilUsesHelmValues: false
+            ruleSelectorNilUsesHelmValues: false
+            resources: {requests: {cpu: 100m, memory: 400Mi}, limits: {memory: 900Mi}}
+        prometheusOperator:
+          resources: {requests: {cpu: 20m, memory: 64Mi}, limits: {memory: 128Mi}}
+        kube-state-metrics:
+          resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 96Mi}}
+        prometheus-node-exporter:
+          resources: {requests: {cpu: 10m, memory: 24Mi}, limits: {memory: 48Mi}}
+        grafana:
+          adminPassword: ""  # chart generates a random one into the kps-grafana secret
+          resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {memory: 256Mi}}
+          additionalDataSources:
+            - name: Loki
+              uid: loki
+              type: loki
+              url: http://loki.observability:3100
+              jsonData:
+                derivedFields:
+                  - name: trace_id
+                    matcherRegex: '"trace_id":"(\w+)"'
+                    datasourceUid: tempo
+                    url: "$${__value.raw}"
+            - name: Tempo
+              uid: tempo
+              type: tempo
+              url: http://tempo.observability:3200
+              jsonData:
+                tracesToLogsV2:
+                  datasourceUid: loki
+                  filterByTraceID: true
+                serviceMap: {datasourceUid: prometheus}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [ServerSideApply=true]  # the operator CRDs exceed the client-side annotation limit
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loki
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: loki
+    targetRevision: 7.5.0
+    helm:
+      releaseName: loki
+      valuesObject:
+        deploymentMode: SingleBinary
+        loki:
+          auth_enabled: false
+          commonConfig: {replication_factor: 1}
+          storage: {type: filesystem}
+          schemaConfig:
+            configs:
+              - from: "2024-04-01"
+                store: tsdb
+                object_store: filesystem
+                schema: v13
+                index: {prefix: loki_index_, period: 24h}
+          limits_config: {retention_period: 48h}
+        singleBinary:
+          replicas: 1
+          persistence: {enabled: false}
+          resources: {requests: {cpu: 50m, memory: 192Mi}, limits: {memory: 512Mi}}
+        read: {replicas: 0}
+        write: {replicas: 0}
+        backend: {replicas: 0}
+        gateway: {enabled: false}
+        chunksCache: {enabled: false}
+        resultsCache: {enabled: false}
+        lokiCanary: {enabled: false}
+        test: {enabled: false}
+        minio: {enabled: false}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [ServerSideApply=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tempo
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: tempo
+    targetRevision: 1.24.4
+    helm:
+      releaseName: tempo
+      valuesObject:
+        tempo:
+          retention: 24h
+          receivers:
+            otlp:
+              protocols:
+                grpc: {endpoint: "0.0.0.0:4317"}
+                http: {endpoint: "0.0.0.0:4318"}
+          resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {memory: 384Mi}}
+        persistence: {enabled: false}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [ServerSideApply=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: alloy
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: alloy
+    targetRevision: 1.15.0
+    helm:
+      releaseName: alloy
+      valuesObject:
+        controller: {type: deployment, replicas: 1}  # one tailer via the API, so no duplicate lines
+        alloy:
+          resources: {requests: {cpu: 20m, memory: 96Mi}, limits: {memory: 256Mi}}
+          configMap:
+            content: |
+              discovery.kubernetes "pods" {
+                role = "pod"
+              }
+              discovery.relabel "pods" {
+                targets = discovery.kubernetes.pods.targets
+                rule {
+                  source_labels = ["__meta_kubernetes_namespace"]
+                  target_label  = "namespace"
+                }
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_name"]
+                  target_label  = "pod"
+                }
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_container_name"]
+                  target_label  = "container"
+                }
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_label_app"]
+                  target_label  = "app"
+                }
+              }
+              loki.source.kubernetes "pods" {
+                targets    = discovery.relabel.pods.output
+                forward_to = [loki.write.default.receiver]
+              }
+              loki.write "default" {
+                endpoint {
+                  url = "http://loki.observability:3100/loki/api/v1/push"
+                }
+              }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
