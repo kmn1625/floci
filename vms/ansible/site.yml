@@ -139,6 +139,30 @@
       ansible.builtin.command: kubectl -n argocd rollout status deploy/argocd-server --timeout=600s
       changed_when: false
 
+    # Calico 3.30+ advertises Profile.projectcalico.org in API discovery but it cannot be
+    # listed; Argo CD then fails to build its cluster cache and every app shows Unknown.
+    # Append it to the exclusions shipped in install.yaml (setting the key replaces them).
+    - name: Read Argo CD resource exclusions
+      ansible.builtin.command: kubectl -n argocd get cm argocd-cm -o jsonpath={.data.resource\.exclusions}
+      register: argocd_exclusions
+      changed_when: false
+
+    - name: Exclude Calico Profile from Argo CD
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - -n
+          - argocd
+          - patch
+          - cm
+          - argocd-cm
+          - --type
+          - merge
+          - -p
+          - "{{ {'data': {'resource.exclusions': argocd_exclusions.stdout ~ '\n- apiGroups: [projectcalico.org]\n  kinds: [Profile]\n'}} | to_json }}"
+      when: "'projectcalico.org' not in argocd_exclusions.stdout"
+      changed_when: true
+
     - name: Root application (app-of-apps) pointing at this public repo
       ansible.builtin.template:
         src: root-app.yaml.j2
