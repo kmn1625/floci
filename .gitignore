@@ -1,0 +1,28 @@
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+
+# Credentials and generated access files — never commit
+*.pem
+*.key
+kubeconfig*
+*.kubeconfig
+.env
+.env.*
+!.env.example
+**/certs/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# Emulator data and run output
+data/
+out/
+*.log

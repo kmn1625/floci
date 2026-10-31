@@ -1,0 +1,74 @@
+# provider_floci.tf.override
+# Terraform AWS provider override for Floci local testing.
+#
+# PURPOSE: This file patches any `provider "aws" {}` block in the same
+# Terraform working directory. Copy or symlink this file into each test
+# phase directory before running terraform init.
+#
+# CRITICAL — ALL 5 skip flags are required (Blocker D from RESEARCH.md):
+# Missing any one causes the provider to authenticate against real AWS,
+# which hangs indefinitely in a CI/test environment without real credentials.
+#
+# ENDPOINT COVERAGE: Every service used across all test phases is listed.
+# Services not listed will fall through to real AWS endpoints — add here
+# as new phases introduce new services.
+
+provider "aws" {
+  region     = "us-east-1"
+  access_key = "fake-agent-key-001"
+  secret_key = "test"
+
+  # --- REQUIRED SKIP FLAGS (all 5 — do not remove any) ---
+  skip_credentials_validation = true   # Blocker D: prevents real AWS auth
+  skip_metadata_api_check     = true   # Blocker D: no EC2 metadata in Docker
+  skip_requesting_account_id  = true   # Blocker D: fake account, no STS needed
+  skip_region_validation      = true   # Blocker D: us-east-1 fake, no AWS validation
+  s3_use_path_style           = true   # Required for Floci S3 path-style URLs
+
+  # --- SERVICE ENDPOINTS ---
+  # Each service must be listed individually. The provider does NOT inherit
+  # a single top-level endpoint for all services.
+  endpoints {
+    # Core compute
+    ec2            = "http://localhost:4566"
+    autoscaling    = "http://localhost:4566"
+    elb            = "http://localhost:4566"
+    elbv2          = "http://localhost:4566"
+
+    # Storage
+    s3             = "http://localhost:4566"
+    s3control      = "http://localhost:4566"
+
+    # Serverless
+    lambda         = "http://localhost:4566"
+    apigateway     = "http://localhost:4566"
+
+    # Identity
+    iam            = "http://localhost:4566"
+    sts            = "http://localhost:4566"
+
+    # Containers
+    ecr            = "http://localhost:4566"
+    eks            = "http://localhost:4566"
+
+    # KMS (Lambda encrypted env vars, S3 SSE-KMS)
+    kms            = "http://localhost:4566"
+
+    # Networking
+    route53        = "http://localhost:4566"
+    acm            = "http://localhost:4566"
+
+    # Secrets / Config
+    secretsmanager = "http://localhost:4566"
+    ssm            = "http://localhost:4566"
+
+    # Monitoring (no-op in Floci but provider must not hit real endpoint)
+    cloudwatch     = "http://localhost:4566"
+    cloudwatchlogs = "http://localhost:4566"
+
+    # Additional services that may appear in agent output
+    dynamodb       = "http://localhost:4566"
+    sqs            = "http://localhost:4566"
+    sns            = "http://localhost:4566"
+  }
+}

@@ -1,0 +1,32 @@
+# Floci AZ — local Azure emulator (ARM + data planes) on :4577.
+# -compat image bundles the Azure CLI + azfloci proxy. Pinned: never `latest`.
+#
+#   docker compose -f azure/docker-compose.yml up -d
+#   curl -sk https://localhost:4577/_floci/health
+#
+# TLS is on because the Terraform azurerm provider only discovers clouds over
+# HTTPS (GET /metadata/endpoints). Trust the self-signed cert from
+# GET /_floci/tls-cert (scripts/trust-floci-az-cert.sh).
+
+services:
+  floci-az:
+    image: floci/floci-az:0.15.0-compat
+    container_name: floci-az
+    restart: unless-stopped
+    ports:
+      - "4577:4577"   # ARM + data-plane API, HTTP and HTTPS on one port
+      - "5672:5672"   # Event Hubs AMQP
+      - "5673:5673"   # Service Bus AMQP
+    environment:
+      FLOCI_AZ_TLS_ENABLED: "true"
+      FLOCI_AZ_HOSTNAME: floci-az
+      FLOCI_AZ_STORAGE_MODE: hybrid          # flush to /app/data every 5s
+      FLOCI_AZ_DOCKER_RESOURCE_NAMESPACE: lab
+    volumes:
+      # Docker-backed services (AKS k3s, ACR registry:2, ACI, Functions,
+      # Container Apps, Redis, Postgres/MySQL, Service Bus/Event Hubs sidecars).
+      - /var/run/docker.sock:/var/run/docker.sock
+      - floci-az-data:/app/data
+
+volumes:
+  floci-az-data:

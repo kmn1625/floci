@@ -1,0 +1,50 @@
+# floci-testing/docker-compose.yml
+# Floci AWS emulator for agent testing.
+# CRITICAL: IAM enforcement flags below are NON-OPTIONAL.
+# Omitting them means all IAM tests are false positives (Blocker B from RESEARCH.md).
+# ECR ports 5100-5199 MUST NOT appear here — dynamic sidecar binding (Blocker from RESEARCH.md).
+
+services:
+  floci:
+    image: floci/floci:1.5.15
+    # NEVER use `latest` — pin ensures reproducible test baseline.
+    container_name: floci
+    restart: unless-stopped
+    ports:
+      - "4566:4566"
+      # 4571 = legacy Floci port; keep for any agent that still uses it
+      - "4571:4571"
+      # NOTE: Do NOT add ports 5100-5199 here. ECR uses dynamic sidecar
+      # binding and pre-mapping these ports blocks ECR container startup.
+    environment:
+      # --- IAM ENFORCEMENT FLAGS (ALL THREE REQUIRED) ---
+      # Without these, Floci is in permit-all mode and IAM tests are meaningless.
+      FLOCI_SERVICES_IAM_ENFORCEMENT_ENABLED: "true"
+      FLOCI_AUTH_VALIDATE_SIGNATURES: "true"
+      FLOCI_SERVICES_IAM_SEED_DEPLOYER_PRINCIPAL: "true"
+      # --- Standard Floci config ---
+      AWS_DEFAULT_REGION: us-east-1
+      FLOCI_HOSTNAME_FROM_IP: "true"
+      # --- Lambda real Docker execution ---
+      # Lambda executes functions in real Docker containers per invocation.
+      # LAMBDA_EXECUTOR=docker requires the Docker socket mount below.
+      LAMBDA_EXECUTOR: docker
+      LAMBDA_REMOVE_CONTAINERS: "true"
+      # --- Disable CORS checks for testing ---
+      FLOCI_DISABLE_CORS_CHECKS: "true"
+    volumes:
+      # Docker socket: required for Lambda real execution (LAMBDA_EXECUTOR=docker)
+      # and for ECR registry:2 sidecar startup.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Persist Floci state across restarts (optional but avoids full re-init).
+      - floci-data:/var/lib/floci
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_floci/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+volumes:
+  floci-data:
+    driver: local

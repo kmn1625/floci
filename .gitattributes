@@ -1,0 +1,4 @@
+# Everything here runs on Linux (VMs, containers, CI): keep LF on every platform.
+* text=auto eol=lf
+*.png binary
+*.jpg binary

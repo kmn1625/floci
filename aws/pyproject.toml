@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "floci-agent-tests"
+version = "0.1.0"
+description = "Floci AWS agent testing harness"
+requires-python = ">=3.11"
+dependencies = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "testcontainers-floci",   # FlociContainer session fixture
+    "boto3>=1.37",            # Assertion layer -- must be 1.37+ per RESEARCH.md
+    "botocore>=1.37",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest-xdist",           # parallel test execution (future phases)
+    "pytest-timeout>=2.2",    # prevent hung agent invocations
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+timeout = 300
+# -v gives test names in output; --tb=short gives compact tracebacks
+addopts = "-v --tb=short"
+# Markers used across test phases
+markers = [
+    "smoke: smoke tests that run before any agent tests",
+    "iam: IAM agent tests (Phase 2)",
+    "s3: S3 agent tests (Phase 3)",
+    "lambda_: Lambda agent tests (Phase 4)",
+    "ec2: EC2/VPC agent tests (Phase 5)",
+    "alb: ALB/ASG agent tests (Phase 6)",
+    "ecr: ECR/Docker agent tests (Phase 7)",
+    "pipeline: full pipeline tests (Phase 8)",
+    "slow: tests that take >30s",
+    "skip_if_floci_down: skip test if Floci health check fails",
+]
