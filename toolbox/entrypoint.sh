@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared lab toolbox entrypoint. CLOUD=azure (default) or aws.
+# Shared lab toolbox entrypoint. CLOUD=azure (default), aws or gcp.
 #
 # Egress guard: the emulators are local, but SDKs/providers default to real cloud
 # endpoints, so a missed endpoint override would leave the machine.
@@ -10,6 +10,8 @@
 #   aws:   every *.amazonaws.com name resolves to 127.0.0.1 with nothing listening,
 #          so a call that misses its http://floci-lab:4566 override fails fast
 #          instead of reaching real AWS.
+#   gcp:   the same for *.googleapis.com and the metadata server; floci-gcp's own
+#          names resolve to it.
 set -euo pipefail
 
 CLOUD="${CLOUD:-azure}"
@@ -60,6 +62,18 @@ elif [ "$CLOUD" = "aws" ]; then
     FLOCI_AWS_HOST="${FLOCI_AWS_HOST:-floci-lab}"
     ip=$(getent hosts "$FLOCI_AWS_HOST" | awk '{print $1; exit}')
     guard "amazonaws.com amazonaws.com.cn aws.amazon.com api.aws" "${ip:+address=/${FLOCI_AWS_HOST}/${ip}}"
+  fi
+elif [ "$CLOUD" = "gcp" ]; then
+  if [ "${GCP_EGRESS_GUARD:-1}" = "1" ]; then
+    # Google APIs and the GCE metadata server sink to 127.0.0.1. *.floci-gcp and
+    # *.localhost.floci.io go to floci-gcp: GKE is reached as container.floci-gcp (host-mode
+    # routing, gcp/lab/FINDINGS.md) and GCS virtual-hosted URLs use localhost.floci.io.
+    FLOCI_GCP_HOST="${FLOCI_GCP_HOST:-floci-gcp}"
+    ip=$(getent hosts "$FLOCI_GCP_HOST" | awk '{print $1; exit}')
+    guard "googleapis.com googleusercontent.com gcr.io pkg.dev run.app appspot.com cloudfunctions.net
+      firebaseio.com firebaseapp.com accounts.google.com metadata.google.internal" \
+      "${ip:+address=/${FLOCI_GCP_HOST}/${ip}
+address=/localhost.floci.io/${ip}}"
   fi
 fi
 

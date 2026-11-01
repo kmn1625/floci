@@ -1,0 +1,73 @@
+# GCP lab on floci-gcp 0.12.0 (local GCP emulator, 24 services) — port 4588, no web UI.
+#
+#   docker compose -f gcp/lab/docker-compose.yml up -d
+#   docker compose -f gcp/lab/docker-compose.yml --profile tools run --rm toolbox terraform -chdir=terraform plan
+#
+# The project name is set because aws/lab is also a directory called "lab".
+name: gcp-lab
+
+services:
+  floci-gcp:
+    image: floci/floci-gcp:0.12.0
+    container_name: floci-gcp
+    restart: unless-stopped
+    user: root  # needs the Docker socket for GKE (k3s), Cloud SQL, Cloud Run, BigQuery (DuckDB)
+    ports:
+      - "4588:4588"
+    environment:
+      FLOCI_GCP_HOSTNAME: floci-gcp
+      FLOCI_GCP_BASE_URL: http://floci-gcp:4588
+      FLOCI_GCP_DEFAULT_PROJECT_ID: flocilab
+      FLOCI_GCP_PROJECTS_STRICT: "true"   # unknown projects get 403 instead of being created on first use
+      FLOCI_GCP_LOCATIONS_STRICT: "true"  # unknown regions are rejected, as on GCP
+      FLOCI_GCP_STORAGE_MODE: hybrid
+      FLOCI_GCP_STORAGE_PERSISTENT_PATH: /app/data
+      FLOCI_GCP_SERVICES_IAM_AUTHORIZATION_MODE: enforce
+      FLOCI_GCP_SERVICES_DOCKER_NETWORK: gcplab
+      FLOCI_GCP_SERVICES_GKE_ENDPOINT_MODE: network  # the toolbox reaches k3s on the compose network
+      # Sidecar images pinned (the emulator defaults several to :latest)
+      FLOCI_GCP_SERVICES_GKE_DEFAULT_IMAGE: rancher/k3s:v1.34.1-k3s1
+      FLOCI_GCP_SERVICES_BIGQUERY_DUCK_DEFAULT_IMAGE: floci/floci-duck:0.3.0
+      # Redpanda needs about 1 GB; the 4-core lab host is already saturated, so Managed Kafka
+      # runs control plane only. Compute Engine stays in its default mock mode for the same reason.
+      FLOCI_GCP_SERVICES_KAFKA_MOCK: "true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - floci-gcp-data:/app/data
+    networks:
+      default:
+        aliases:
+          - container.floci-gcp     # GKE host-mode routing (Terraform's container endpoint)
+          - localhost.floci.io
+          - container.localhost.floci.io
+
+  toolbox:
+    profiles: ["tools"]
+    build: ../../toolbox
+    image: floci-lab-toolbox:local
+    depends_on: [floci-gcp]
+    working_dir: /work
+    environment:
+      CLOUD: gcp
+      GOOGLE_CLOUD_PROJECT: flocilab
+      CLOUDSDK_CORE_PROJECT: flocilab
+      # floci-gcp does not validate external credentials; any value satisfies the provider
+      # and SDKs without a real OAuth exchange (the egress guard blocks one anyway).
+      GOOGLE_OAUTH_ACCESS_TOKEN: floci-lab-token
+      FLOCI_GCP_ENDPOINT: http://floci-gcp:4588
+      PUBSUB_EMULATOR_HOST: floci-gcp:4588
+      FIRESTORE_EMULATOR_HOST: floci-gcp:4588
+      DATASTORE_EMULATOR_HOST: floci-gcp:4588
+      STORAGE_EMULATOR_HOST: http://floci-gcp:4588
+    volumes:
+      - ./:/work
+      - ../../k8s:/k8s:ro  # shared manifests (hello-api overlays)
+      - toolbox-plugin-cache:/root/.terraform.d/plugin-cache
+
+networks:
+  default:
+    name: gcplab
+
+volumes:
+  floci-gcp-data:
+  toolbox-plugin-cache:
