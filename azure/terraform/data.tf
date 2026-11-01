@@ -45,6 +45,7 @@ resource "azurerm_postgresql_flexible_server" "lab" {
   storage_mb                    = 65536
   administrator_login           = "labadmin"
   administrator_password        = random_password.db.result
+  # devops:approved-exposure lab only: access limited by the vnet-only firewall rule; floci-az publishes it on the host anyway (F-30)
   public_network_access_enabled = true
   tags                          = local.tags
 

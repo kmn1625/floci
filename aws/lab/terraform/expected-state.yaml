@@ -1,0 +1,22 @@
+# Steady state for devops-project's drift-checker.py and terraform-plan-gate.py
+# (schema: devops-project/expected-states/schema.yaml). Day-2: the lab is built, so a
+# plan should change nothing; every change under test is listed per scenario.
+tool: terraform
+module: floci-aws-lab
+environment: dev
+
+expected_changes:      # steady state between scenarios
+  add: []
+  modify: []
+  destroy: []
+
+expected_outputs:
+  bucket: "<not null>"
+  orders_table: "<not null>"
+  jobs_queue_url: "<contains: jobs>"
+  eks_cluster: "<not null>"
+  db_endpoint: "<not null>"
+
+tolerances:
+  extra_add_ok: false
+  extra_modify_ok: false
