@@ -32,3 +32,6 @@ vms/.keys/
 
 # Terraform archive_file output (gcp/lab Cloud Functions source zip)
 **/.build/
+
+# devops-project engine output (tools/iac-loop.py)
+iac-loop-result.json
