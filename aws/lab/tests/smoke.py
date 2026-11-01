@@ -13,6 +13,7 @@ Known emulator gaps report as GAP (see FINDINGS.md); exit code = number of FAILs
 
 import json
 import os
+import re
 import subprocess
 import time
 import urllib.parse
@@ -149,6 +150,11 @@ def rds_postgres():
     db = aws.client("rds").describe_db_instances(DBInstanceIdentifier="flocilab-pg")["DBInstances"][0]
     pw = json.loads(aws.client("secretsmanager").get_secret_value(SecretId=o["db_secret_arn"])["SecretString"])["password"]
     host, port = db["Endpoint"]["Address"], str(db["Endpoint"]["Port"])
+    # Floci reports an IP, not a DNS name (A-11), and after a restart it is the IP on the VPC
+    # network, which a client outside the VPC cannot reach (A-20). Real RDS endpoints are DNS
+    # names that resolve per network, so connect the same way: Floci's name, the reported port.
+    if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", host):
+        host = urllib.parse.urlparse(os.environ.get("AWS_ENDPOINT_URL", "http://floci-lab:4566")).hostname
     r = subprocess.run(["psql", "-h", host, "-p", port, "-U", "labadmin", "-d", "app", "-tAc", "show server_version"],
                        capture_output=True, text=True, env={**os.environ, "PGPASSWORD": pw, "PGCONNECT_TIMEOUT": "10"})
     if r.returncode:

@@ -41,8 +41,16 @@
 
 ## Still open
 
-- **The restart outages are still there:** the RDS endpoint is unreachable (A-20), EKS's k3s isn't running (A-21),
-  EC2 is `pending`, and API → Lambda returns 502. These are emulator restart effects, not repaired here.
+- **The restart outages are fixed.** None of them matched a SaaS runbook, so four were added: `service-unreachable`,
+  `cluster-unhealthy`, `http-5xx`, `after-restart`.
+  - **RDS:** it was healthy. Its IP endpoint moved to the VPC network and the out-of-VPC client couldn't reach it;
+    clients now connect by name plus port.
+  - **EKS:** k3s exited because EC2 had taken its pinned bridge IP. Start order gave the address back; the node
+    is `Ready` and `hello-api` is 2/2.
+  - **EC2:** stuck `pending`. Stop and start through the API, keeping the container in step (A-23).
+  - **Lambda 502:** the cold start after the restart; it passes once warm.
+
+  Smoke result: 12 pass, 2 known gaps, 0 fail. `scripts/recover-after-restart.py` repeats the EKS and EC2 steps.
 - **CLI `terraform import` / `state rm` change state with no plan.** Only the PreToolUse prompt stands in the
   way; use import and removed blocks.
 - **No GCP collector in `unmanaged-check` yet.**
