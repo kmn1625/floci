@@ -43,4 +43,5 @@ drift.json
 terraform-outputs.json
 plan-postapply.json
 postapply.binary
+state.json
 devops-state.json

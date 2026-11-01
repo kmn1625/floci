@@ -10,6 +10,7 @@
 #   tfplan.binary, plan.json     what devops-pipeline.ps1 -Phase plan produces
 #   terraform-outputs.json       what -Phase apply captures after apply
 #   drift.json                   refresh-only plan: real cloud state vs Terraform state
+#   state.json                   terraform show -json, for unmanaged-check.py
 set -euo pipefail
 cd /work/terraform
 
@@ -18,8 +19,9 @@ terraform validate -no-color
 terraform plan -input=false -no-color -out=tfplan.binary "$@"
 terraform show -json tfplan.binary > plan.json
 terraform output -json > terraform-outputs.json
+terraform show -json > state.json   # devops-project tools/unmanaged-check.py
 
 terraform plan -input=false -no-color -refresh-only -out=drift.binary > /dev/null
 terraform show -json drift.binary > drift.json
 rm -f drift.binary
-echo "saas-plan: wrote tfplan.binary, plan.json, terraform-outputs.json, drift.json"
+echo "saas-plan: wrote tfplan.binary, plan.json, terraform-outputs.json, state.json, drift.json"

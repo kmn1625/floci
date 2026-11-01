@@ -41,7 +41,7 @@ So `scripts/saas-plan.sh` produces in the toolbox the files the pipeline would: 
 | S4 | Storage LRS → GRS | "Apply complete", but the cloud kept LRS (F-34); nothing noticed | `--stage converge` FAILs: the post-apply plan isn't empty |
 | S5 | Postgres storage 32 → 64 GB | Applied; the update hangs in `Creating` (F-33) | Same (emulator) |
 | S6 | **Portal: RDP from `*` added to the NSG** | Plan gate PASS (prod too), drift checker PASS, operator "PASS … no change from baseline" | Drift checker FAILs ("changed outside Terraform (security_rule)"); prod gate blocks; operator reports the regression with the resource |
-| S6 | Portal: Postgres firewall `portal-allow-all` | **Invisible** to everything, Terraform included (unmanaged resource) | Still invisible. The runbook now names the blind spot: list the parent's children in the cloud |
+| S6 | Portal: Postgres firewall `portal-allow-all` | **Invisible** to everything, Terraform included (unmanaged resource) | `unmanaged-check.py` reports it as P0 (verified live against floci-az) |
 | S7 | k8s: `cluster-admin` for group `devs`, wildcard role, Secret reads | Only checkov's indirect bind/escalate checks; our guardrails PASS | RBAC guardrail FAILs each one unless annotated `devops.io/approved-privilege` |
 
 Also fixed:
@@ -59,8 +59,9 @@ Also fixed:
   Fixing it from the emulator side would mean replacing a server that holds data, so it waits for the owner.
 - **The pipeline can't target a toolbox-only environment.** `devops-pipeline.ps1` has no way to run Terraform
   elsewhere; the lab uses `scripts/saas-plan.sh`.
-- **Unmanaged resources:** no SaaS check compares cloud inventory with state. An inventory-vs-state check
-  (Azure Resource Graph, `aws resourcegroupstaggingapi`, Cloud Asset Inventory) is the next step.
+- **Unmanaged resources:** now covered for Azure by `tools/unmanaged-check.py`. Its first run found three real
+  orphans (SQL server F-18, MySQL server F-22, AKS F-16), now listed in `terraform/.unmanaged-ignore`. The AWS and
+  GCP collectors come with those phases.
 
 ## Re-run
 
@@ -70,5 +71,6 @@ docker compose --profile tools run --rm -T toolbox bash scripts/saas-plan.sh
 cd ../../devops-project
 python tools/terraform-plan-gate.py --work-dir ../floci/azure/terraform --env prod --stage plan
 python tools/drift-checker.py       --work-dir ../floci/azure/terraform --env dev
-python tools/iac-loop.py            --work-dir ../floci/azure/terraform --baseline ../floci/azure/checkov-baseline.txt
+python tools/iac-loop.py            --work-dir ../floci/azure/terraform   # uses terraform/checkov-baseline.txt
+python tools/unmanaged-check.py     --work-dir ../floci/azure/terraform --arm-endpoint https://localhost:4577 --insecure
 ```

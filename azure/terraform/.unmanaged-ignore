@@ -1,0 +1,5 @@
+# Known resources in rg-flocilab-dev that Terraform does not manage (devops-project tools/unmanaged-check.py).
+# Each one is a documented emulator gap; anything else it reports is new and needs triage.
+/providers/microsoft\.sql/servers/sql-flocilab-            # F-18: created, then unmanageable (restorableDroppedDatabases), gated
+/providers/microsoft\.dbformysql/flexibleservers/mysql-flocilab-   # F-22: orphan left by the provider panic, gated
+/providers/microsoft\.containerservice/managedclusters/aks-flocilab   # F-16: AKS comes from scripts/aks.sh, not Terraform
