@@ -50,6 +50,18 @@ Also fixed:
 - The Key Vault URI is no longer passed where a vault name is expected.
 - Normalisation noise (`description: null → ""`) is no longer drift.
 
+## State operations: manual resources, manual deletes, import, `removed`, `state rm`, `moved`
+
+| # | Test | What happened | SaaS before | SaaS after |
+|---|---|---|---|---|
+| T1 | Firewall rule `office-vpn` and NSG `nsg-flocilab-manual` created by hand | `unmanaged-check` reported both (P0 for the firewall rule and the NSG's SSH rule). Firewall rule adopted with an `import` block plus `plan -generate-config-out` (hard-coded `server_id` replaced by a reference in review); NSG adopted with CLI `terraform import`, missing tags added | Plan gate showed the import as one of 42 `no-op`s | Summary: `state: 1 import`, plus an `INFO import` line naming the ID |
+| T1 | CLI `terraform import` | Changes state with no plan, so no gate sees it; only the PreToolUse prompt | — | Prefer `import` blocks: reviewed in the plan |
+| T2a | Subnet `snet-jobs` deleted by hand, still wanted | Refresh: "deleted outside Terraform" (subnet and NSG association) → apply recreated both → converge PASS | (fixed earlier today) drift checker FAIL, prod blocks | Wording: "this plan recreates it" |
+| T2b | NSG deleted by hand, retired from the code | Plan said "No changes" but state still held it; `terraform apply -refresh-only` recorded the deletion | Message said "this plan reverts it", which was wrong | "no longer in the code either; `terraform apply -refresh-only` records the deletion" |
+| T3a | `removed { destroy = false }` on `office-vpn` | Terraform forgot it and it stayed in Azure; `unmanaged-check` then reported it P0 | Plan gate silent (`+0 ~0 -0`) | New `forget` category: warns in dev and staging, blocks in prod |
+| T3b | `terraform state rm` on `snet-jobs` | Plan wanted to create a subnet that exists, colliding on apply. `unmanaged-check` **missed** it twice: the VNet's computed `subnet` attribute, and the association resource reusing the subnet's ID | Plan gate blocked prod only by luck (association replace) | `unmanaged-check` reports the subnet (P1). Both re-adopted with `import` blocks: 2 imported, converge PASS |
+| T4 | `azurerm_storage_queue.jobs` renamed to `job_queue` | Without `moved`: delete and create, so the queue's data is lost. With `moved`: pure move, 0 changes, state address updated | Data-loss block without `moved`; with `moved`, "plan has no changes" | Without `moved`, the hint gives the exact `moved { from … to … }` block; with it, `state: 1 move` and the from → to line |
+
 ## Still open
 
 - **Done with the owner's OK:** Redis was replaced through the SaaS flow. The plan gate blocked `[data-loss]` until
