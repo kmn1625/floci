@@ -7,6 +7,8 @@ real infrastructure code without a cloud account or a bill.
 |---|---|---|---|
 | [`azure/`](azure/) | `floci/floci-az:0.15.0-compat` | 4577 (HTTP + HTTPS) | in progress |
 | [`aws/`](aws/) | `floci/floci:1.5.15` | 4566 | test harness (pytest + Terraform override) |
+| [`aws/lab/`](aws/lab/) | `floci/floci:2.3.0` | 4566 | 93 resources, smoke tests, ECR → EKS ([findings](aws/lab/FINDINGS.md)) |
+| [`gcp/lab/`](gcp/lab/) | `floci/floci-gcp:0.12.0` | 4588 | 66 resources, smoke tests, Cloud Run + GKE ([findings](gcp/lab/FINDINGS.md)) |
 
 ## Quick start
 
@@ -18,7 +20,7 @@ docker compose -f aws/docker-compose.yml up -d
 curl -s http://localhost:4566/_floci/health
 ```
 
-Needs Docker Desktop (or any Docker engine). Both emulators start Docker-backed
+Needs Docker Desktop (or any Docker engine). The emulators start Docker-backed
 services (Kubernetes, registries, databases) through the mounted Docker socket.
 
 ## Run the Azure lab
@@ -84,6 +86,11 @@ Verified 31 Oct 2026: every Prometheus target up (hello-api, kubelet, node-expor
 Grafana datasources Prometheus, Loki and Tempo healthy, app logs in Loki, a log's `trace_id` opens its trace in
 Tempo. The stack needs 3 GB workers; on a 4-core laptop pause the Floci emulators while it runs.
 
+## Run the GCP lab
+
+See [`gcp/lab/README.md`](gcp/lab/README.md). floci-gcp runs with IAM enforcement on, so Terraform runs as a
+deployer service account (Floci-issued token) instead of an anonymous token (`gcp/lab/FINDINGS.md` G-09).
+
 ## Azure services in floci-az 0.15.0
 
 Verified from the running emulator's startup banner (2026-10-31). floci-az has no
@@ -101,7 +108,8 @@ is at `http://localhost:4566/_floci/ui`.
 2. **Real Kubernetes on VMs** — 3 Ubuntu VMs (Hyper-V + Multipass), cloud-init +
    Ansible + kubeadm (not k3s / minikube), namespaces and RBAC, Argo CD deploying
    this repo's manifests from GitHub.
-3. **AWS lab** — the same on `floci` (EKS, ECR, VPC, IAM, RDS, ...).
+3. **AWS lab** — the same on `floci` (EKS, ECR, VPC, IAM, RDS, ...). Done: `aws/lab`.
+4. **GCP lab** — the same on `floci-gcp` (GKE, Cloud Run, Cloud SQL, Pub/Sub, ...). Done: `gcp/lab`.
 
 ## License
 

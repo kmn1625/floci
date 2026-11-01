@@ -1,0 +1,28 @@
+# GKE on floci-gcp (k3s). floci-gcp has no Artifact Registry (gcp/lab/FINDINGS.md G-01), so the
+# image is the public GHCR build, pinned by digest. Deploy with gcp/lab/scripts/gke-deploy.sh.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+images:
+  - name: hello-api
+    newName: ghcr.io/kmn1625/hello-api
+    digest: sha256:06a03e3721de009766ee788296f23c7438547f73406f8f852eacf1bf8aa279f9 # 0.2.0
+patches:
+  - target:
+      kind: Deployment
+      name: hello-api
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/env/0/value
+        value: gke
+  # Workload Identity: the hello-api KSA acts as flocilab-app (google_service_account_iam_member
+  # app_workload_identity in gcp/lab/terraform/containers.tf).
+  - target:
+      kind: ServiceAccount
+      name: hello-api
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          iam.gke.io/gcp-service-account: flocilab-app@flocilab.iam.gserviceaccount.com
