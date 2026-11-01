@@ -1,0 +1,3 @@
+# Known resources the lab's Terraform does not manage (devops-project tools/unmanaged-check.py).
+s3_bucket/awslambda-us-east-1-tasks      # Floci's own Lambda code bucket (emulator internals)
+ecr_repository/sample-app/app            # appeared with the lab ECR on 2026-10-31 23:41:18, in no lab code; likely a Floci sample
