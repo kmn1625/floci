@@ -1,5 +1,7 @@
 # Day-2 S1 (AWS): reports queue and node-exporter metrics from inside the VPC.
-resource "aws_sqs_queue" "reports" {
+# T3a: forgotten with a removed block, re-adopted under a new address with an import block
+# (AWS-form queue URL: the provider will not parse Floci's, FINDINGS A-22), block removed after apply.
+resource "aws_sqs_queue" "report_queue" {
   name                       = "${var.prefix}-reports"
   kms_master_key_id          = aws_kms_key.lab.id
   visibility_timeout_seconds = 120
@@ -8,6 +10,7 @@ resource "aws_sqs_queue" "reports" {
     maxReceiveCount     = 5
   })
 }
+
 
 resource "aws_vpc_security_group_ingress_rule" "app_metrics" {
   security_group_id = aws_security_group.app.id
