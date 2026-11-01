@@ -31,7 +31,7 @@ resource "azurerm_storage_container" "artifacts" {
   container_access_type = "private"
 }
 
-resource "azurerm_storage_queue" "jobs" {
+resource "azurerm_storage_queue" "job_queue" {
   name                 = "jobs"
   storage_account_name = azurerm_storage_account.lab.name
 }
@@ -108,4 +108,10 @@ resource "azurerm_container_registry" "lab" {
   lifecycle {
     ignore_changes = [role_assignment_mode] # not returned by floci-az (F-07)
   }
+}
+
+# Day-2 T4: address renamed jobs -> job_queue; moved keeps the queue (and its messages).
+moved {
+  from = azurerm_storage_queue.jobs
+  to   = azurerm_storage_queue.job_queue
 }
