@@ -79,6 +79,12 @@ resource "azurerm_key_vault_secret" "db_password" {
   key_vault_id = azurerm_key_vault.lab.id
   content_type = "password"
   tags         = local.tags
+
+  lifecycle {
+    # floci-az rejects secret PATCH with 405 (FINDINGS F-25); a tag change would otherwise
+    # need -replace, i.e. deleting the secret. Remove on real Azure.
+    ignore_changes = [tags]
+  }
 }
 
 resource "azurerm_key_vault_key" "app" {

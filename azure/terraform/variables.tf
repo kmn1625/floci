@@ -37,5 +37,6 @@ locals {
     Environment = var.environment
     Owner       = "platform-team"
     ManagedBy   = "terraform"
+    CostCenter  = "cc-1042"
   }
 }
