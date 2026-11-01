@@ -52,10 +52,11 @@ Also fixed:
 
 ## Still open
 
-- **Redis:** ARM says `Succeeded`, but no container exists after the restart. Restoring it means replacing
-  (deleting) the cache, which needs the owner's OK.
-- **The `portal-allow-all` Postgres firewall rule** added in S6 is still there. Removing it is a delete, so it
-  waits for the owner's OK. floci-az doesn't enforce firewall rules (F-30), so it opens nothing extra here.
+- **Done with the owner's OK:** Redis was replaced through the SaaS flow. The plan gate blocked `[data-loss]` until
+  `--approve data-loss="..."`; then apply, converge gate PASS, smoke `redis PING -> PONG`. The S6 rogue
+  `portal-allow-all` firewall rule was deleted (only `vnet-only` remains).
+- **Postgres is still unreachable:** after the restart its `fqdn` is `localhost` (F-32), so smoke `postgres` fails.
+  Fixing it from the emulator side would mean replacing a server that holds data, so it waits for the owner.
 - **The pipeline can't target a toolbox-only environment.** `devops-pipeline.ps1` has no way to run Terraform
   elsewhere; the lab uses `scripts/saas-plan.sh`.
 - **Unmanaged resources:** no SaaS check compares cloud inventory with state. An inventory-vs-state check
