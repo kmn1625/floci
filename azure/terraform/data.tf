@@ -42,7 +42,7 @@ resource "azurerm_postgresql_flexible_server" "lab" {
   resource_group_name           = azurerm_resource_group.lab.name
   version                       = "16"
   sku_name                      = "B_Standard_B1ms"
-  storage_mb                    = 32768
+  storage_mb                    = 65536
   administrator_login           = "labadmin"
   administrator_password        = random_password.db.result
   public_network_access_enabled = true

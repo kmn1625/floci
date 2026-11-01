@@ -5,7 +5,7 @@ resource "azurerm_storage_account" "lab" {
   location                        = azurerm_resource_group.lab.location
   resource_group_name             = azurerm_resource_group.lab.name
   account_tier                    = "Standard"
-  account_replication_type        = "LRS"
+  account_replication_type        = "LRS" # GRS: floci-az reports success but keeps LRS (FINDINGS F-34)
   min_tls_version                 = "TLS1_2"
   allow_nested_items_to_be_public = false
   tags                            = local.tags
