@@ -1,0 +1,5 @@
+# Known resources the lab root does not manage (devops-project tools/unmanaged-check.py).
+service_account/.*flocilab-deployer@     # managed by ../bootstrap (separate state on purpose)
+bucket/flocilab-logs$                    # G-09: created with an external token, unmanageable by anyone; kept as evidence
+bucket/flocilab-probe-owner$             # test bucket from the G-09 probe (2026-11-01); delete only with the owner's OK
+iam/roles/owner -> serviceAccount:flocilab-deployer@   # bootstrap's deployer grant (approved-privilege in ../bootstrap)

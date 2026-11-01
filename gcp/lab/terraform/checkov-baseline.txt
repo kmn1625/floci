@@ -1,0 +1,21 @@
+# checkov baseline: iac-loop.py --save-baseline
+CKV2_GCP_13 google_sql_database_instance.db
+CKV2_GCP_4 google_logging_project_sink.audit
+CKV_GCP_108 google_sql_database_instance.db
+CKV_GCP_109 google_sql_database_instance.db
+CKV_GCP_110 google_sql_database_instance.db
+CKV_GCP_111 google_sql_database_instance.db
+CKV_GCP_121 google_bigquery_table.orders
+CKV_GCP_51 google_sql_database_instance.db
+CKV_GCP_53 google_sql_database_instance.db
+CKV_GCP_54 google_sql_database_instance.db
+CKV_GCP_6 google_sql_database_instance.db
+CKV_GCP_60 google_sql_database_instance.db
+CKV_GCP_61 google_container_cluster.lab
+CKV_GCP_62 google_storage_bucket.logs
+CKV_GCP_65 google_container_cluster.lab
+CKV_GCP_66 google_container_cluster.lab
+CKV_GCP_69 google_container_cluster.lab
+CKV_GCP_79 google_sql_database_instance.db
+CKV_GCP_80 google_bigquery_table.orders
+CKV_GCP_82 google_kms_crypto_key.lab

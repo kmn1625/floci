@@ -9,7 +9,7 @@ resource "google_pubsub_topic" "orders" {
   }
 }
 
-resource "google_pubsub_topic" "orders_dlq" {
+resource "google_pubsub_topic" "dead_letter" {
   name         = "${var.prefix}-orders-dlq"
   kms_key_name = google_kms_crypto_key.lab.id
   depends_on   = [google_kms_crypto_key_iam_member.agents]
@@ -30,14 +30,14 @@ resource "google_pubsub_subscription" "orders_worker" {
     maximum_backoff = "300s"
   }
   dead_letter_policy {
-    dead_letter_topic     = google_pubsub_topic.orders_dlq.id
+    dead_letter_topic     = google_pubsub_topic.dead_letter.id
     max_delivery_attempts = 5
   }
 }
 
 resource "google_pubsub_subscription" "orders_dlq" {
   name  = "${var.prefix}-orders-dlq"
-  topic = google_pubsub_topic.orders_dlq.id
+  topic = google_pubsub_topic.dead_letter.id
 }
 
 resource "google_pubsub_topic_iam_member" "app_publisher" {
@@ -48,7 +48,7 @@ resource "google_pubsub_topic_iam_member" "app_publisher" {
 
 # On GCP the Pub/Sub service agent forwards undeliverable messages to the DLQ topic.
 resource "google_pubsub_topic_iam_member" "dlq_publisher" {
-  topic  = google_pubsub_topic.orders_dlq.id
+  topic  = google_pubsub_topic.dead_letter.id
   role   = "roles/pubsub.publisher"
   member = local.service_agents.pubsub
 }
@@ -168,4 +168,10 @@ resource "google_monitoring_metric_descriptor" "orders" {
     value_type  = "STRING"
     description = "Deployment environment"
   }
+}
+
+# Day-2 T4 (GCP): address renamed orders_dlq -> dead_letter; moved keeps the topic and its messages.
+moved {
+  from = google_pubsub_topic.orders_dlq
+  to   = google_pubsub_topic.dead_letter
 }
