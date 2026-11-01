@@ -40,6 +40,7 @@ resource "google_service_account" "deployer" {
 # Broad on purpose: the lab root creates resources in every service. A production deployer
 # gets the narrower predefined roles for the services it manages.
 resource "google_project_iam_member" "deployer_owner" {
+  # devops:approved-privilege lab deployer creates resources in every service; production gets per-service roles
   project = var.project
   role    = "roles/owner"
   member  = google_service_account.deployer.member

@@ -5,7 +5,7 @@ resource "azurerm_storage_account" "lab" {
   location                        = azurerm_resource_group.lab.location
   resource_group_name             = azurerm_resource_group.lab.name
   account_tier                    = "Standard"
-  account_replication_type        = "LRS"
+  account_replication_type        = "LRS" # GRS: floci-az reports success but keeps LRS (FINDINGS F-34)
   min_tls_version                 = "TLS1_2"
   allow_nested_items_to_be_public = false
   tags                            = local.tags
@@ -79,6 +79,12 @@ resource "azurerm_key_vault_secret" "db_password" {
   key_vault_id = azurerm_key_vault.lab.id
   content_type = "password"
   tags         = local.tags
+
+  lifecycle {
+    # floci-az rejects secret PATCH with 405 (FINDINGS F-25); a tag change would otherwise
+    # need -replace, i.e. deleting the secret. Remove on real Azure.
+    ignore_changes = [tags]
+  }
 }
 
 resource "azurerm_key_vault_key" "app" {

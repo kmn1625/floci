@@ -1,0 +1,21 @@
+# Steady state for devops-project's drift-checker.py and terraform-plan-gate.py
+# (schema: devops-project/expected-states/schema.yaml). Day-2: the lab is built, so a
+# plan should change nothing; every change under test is listed per scenario.
+tool: terraform
+module: floci-azure-lab
+environment: dev
+
+expected_changes:      # steady state between scenarios
+  add: []
+  modify: []
+  destroy: []
+
+expected_outputs:
+  storage_account: "<not null>"
+  key_vault_uri: "<contains: vault.azure.net>"
+  acr_login_server: "<contains: azurecr.io>"
+  postgres_host: "<not null>"
+
+tolerances:
+  extra_add_ok: false
+  extra_modify_ok: false

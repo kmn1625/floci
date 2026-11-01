@@ -12,6 +12,7 @@ locals {
     apps = "10.40.4.0/24"
     data = "10.40.5.0/24"
     vms  = "10.40.6.0/24"
+    jobs = "10.40.7.0/24"
   }
 }
 
@@ -41,6 +42,19 @@ resource "azurerm_network_security_group" "vms" {
     source_address_prefix      = "VirtualNetwork"
     destination_address_prefix = "*"
   }
+
+  # Day-2 S1: HTTPS from inside the VNet (ingress controller on the VMs).
+  security_rule {
+    name                       = "allow-https-vnet"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = "VirtualNetwork"
+    destination_address_prefix = "*"
+  }
 }
 
 # Every subnet gets an NSG (CKV2_AZURE_31). aks/apps/data use Azure's default rules.
@@ -52,7 +66,7 @@ resource "azurerm_network_security_group" "default" {
 }
 
 resource "azurerm_subnet_network_security_group_association" "default" {
-  for_each                  = toset(["aks", "apps", "data"])
+  for_each                  = toset(["aks", "apps", "data", "jobs"])
   subnet_id                 = azurerm_subnet.this[each.key].id
   network_security_group_id = azurerm_network_security_group.default.id
 }

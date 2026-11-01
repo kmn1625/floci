@@ -35,6 +35,8 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: platform-admins
+  annotations:
+    devops.io/approved-privilege: "break-glass group for cluster operators; membership managed in the identity provider"
 subjects:
   - kind: Group
     name: platform-admins

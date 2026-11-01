@@ -35,3 +35,12 @@ vms/.keys/
 
 # devops-project engine output (tools/iac-loop.py)
 iac-loop-result.json
+
+# devops-project pipeline artefacts (plan JSON and outputs hold secrets in clear text)
+tfplan.binary
+plan.json
+drift.json
+terraform-outputs.json
+plan-postapply.json
+postapply.binary
+devops-state.json
