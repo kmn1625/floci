@@ -41,4 +41,6 @@ tfplan.binary
 plan.json
 drift.json
 terraform-outputs.json
+plan-postapply.json
+postapply.binary
 devops-state.json
