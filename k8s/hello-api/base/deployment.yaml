@@ -23,8 +23,8 @@ spec:
     spec:
       serviceAccountName: hello-api
       automountServiceAccountToken: false
-      # preStop sleep (5 s) + the app's own Shutdown (10 s) must fit in the grace period.
-      terminationGracePeriodSeconds: 20
+      # preStop sleep (10 s) + the app's own Shutdown (10 s) must fit in the grace period.
+      terminationGracePeriodSeconds: 25
       # A drain moved both replicas onto one worker (1.37 upgrade drill); spread them again
       # when there is room, without blocking scheduling on a one-node lab.
       topologySpreadConstraints:
@@ -46,11 +46,13 @@ spec:
           imagePullPolicy: IfNotPresent
           # Keep serving while the endpoint removal reaches every node's kube-proxy. Without it
           # a drain cost 7 failed requests in 6 s: SIGTERM closed the listener at once (1.37
-          # upgrade drill). Native sleep action: the distroless image has no sleep binary.
+          # upgrade drill). 5 s was not enough with the control plane at load 10 on 2 vCPUs: the
+          # endpoint removal reached kube-proxy late and 4 requests failed. Native sleep action:
+          # the distroless image has no sleep binary.
           lifecycle:
             preStop:
               sleep:
-                seconds: 5
+                seconds: 10
           ports:
             - name: http
               containerPort: 8080

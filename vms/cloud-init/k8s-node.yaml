@@ -46,11 +46,11 @@ runcmd:
   - containerd config default > /etc/containerd/config.toml
   - sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
   - systemctl restart containerd
-  # Kubernetes 1.36 packages, held at 1.36.6 so nodes never drift apart
+  # Kubernetes 1.37 packages, held at 1.37.2 so nodes never drift apart
   - mkdir -p /etc/apt/keyrings
-  - curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.36/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-  - echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.36/deb/ /' > /etc/apt/sources.list.d/kubernetes.list
+  - curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.37/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+  - echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.37/deb/ /' > /etc/apt/sources.list.d/kubernetes.list
   - apt-get update
-  - apt-get install -y kubelet=1.36.6-1.1 kubeadm=1.36.6-1.1 kubectl=1.36.6-1.1
+  - apt-get install -y kubelet=1.37.2-1.1 kubeadm=1.37.2-1.1 kubectl=1.37.2-1.1
   - apt-mark hold kubelet kubeadm kubectl
   - systemctl enable --now kubelet

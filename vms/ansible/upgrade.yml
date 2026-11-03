@@ -1,0 +1,146 @@
+# Minor upgrade of the kubeadm cluster, one node at a time (kubeadm's documented order:
+# first control plane, then the other control planes, then workers). Runs ON the control-plane VM like site.yml:
+#
+#   ansible-playbook -i inventory.ini upgrade.yml -e k8s_target=1.37.2
+#
+# Then set k8s_version in group_vars/all.yml and the package pin in cloud-init/k8s-node.yaml
+# to the same version, so a node added later joins at the cluster's version.
+#
+# Found on the 1.36.6 -> 1.37.2 drill (2026-11-03), and handled here:
+#   - a PDB that allows no disruption makes `kubectl drain` retry forever (the default
+#     --timeout is 0): pre-flight lists them, and drains time out instead of hanging;
+#   - Argo CD's pods use emptyDir, so a drain without --delete-emptydir-data refuses;
+#   - a pod with no controller is refused (or deleted for good with --force): pre-flight stops.
+
+- name: Pre-flight
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  vars:
+    kubectl: kubectl --kubeconfig /etc/kubernetes/admin.conf
+    target_minor: "{{ k8s_target.split('.')[:2] | join('.') }}"
+  tasks:
+    - name: Server version
+      ansible.builtin.command: "{{ kubectl }} version -o json"
+      register: version
+      changed_when: false
+
+    - name: One minor version at a time
+      ansible.builtin.assert:
+        that:
+          - (target_minor.split('.')[1] | int) - (current.split('.')[1] | int) in [0, 1]
+        fail_msg: "{{ current }} -> {{ k8s_target }}: kubeadm upgrades one minor at a time"
+      vars:
+        current: "{{ (version.stdout | from_json).serverVersion.gitVersion | regex_replace('^v', '') }}"
+
+    - name: Every node is Ready, nothing blocks a drain (files/upgrade_preflight.py)
+      # Piped, not passed as stdin: Ansible would template the JSON into a Python dict.
+      # The script runs on the control-plane VM, which is also where this playbook lives.
+      ansible.builtin.shell: >-
+        set -o pipefail; {{ kubectl }} get nodes,pdb,pods -A -o json
+        | python3 {{ playbook_dir }}/files/upgrade_preflight.py
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: etcd snapshot before the upgrade (restore path if the control plane breaks)
+      ansible.builtin.command: >-
+        {{ kubectl }} -n kube-system exec etcd-{{ inventory_hostname }} --
+        etcdctl --endpoints=https://127.0.0.1:2379 --cacert=/etc/kubernetes/pki/etcd/ca.crt
+        --cert=/etc/kubernetes/pki/etcd/server.crt --key=/etc/kubernetes/pki/etcd/server.key
+        snapshot save /var/lib/etcd/pre-{{ k8s_target }}.db
+      args:
+        # /var/lib/etcd is the etcd pod's hostPath. A re-run after a partial upgrade keeps the first snapshot.
+        creates: /var/lib/etcd/pre-{{ k8s_target }}.db
+      changed_when: true
+
+- name: Upgrade nodes
+  hosts: control_plane:workers
+  become: true
+  serial: 1
+  gather_facts: false
+  vars:
+    kubectl: kubectl --kubeconfig /etc/kubernetes/admin.conf
+    target_minor: "{{ k8s_target.split('.')[:2] | join('.') }}"
+    pkg: "{{ k8s_target }}-1.1"
+    first_cp: "{{ groups['control_plane'][0] }}"
+  tasks:
+    - name: Already at the target?
+      ansible.builtin.command: kubelet --version
+      register: kubelet_version
+      changed_when: false
+
+    - name: Upgrade this node
+      when: kubelet_version.stdout != "Kubernetes v" + k8s_target
+      block:
+        - name: Package repository for the target minor
+          ansible.builtin.copy:
+            dest: /etc/apt/sources.list.d/kubernetes.list
+            content: >
+              deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg]
+              https://pkgs.k8s.io/core:/stable:/v{{ target_minor }}/deb/ /
+            mode: "0644"
+
+        - name: Unhold the Kubernetes packages
+          ansible.builtin.command: apt-mark unhold kubeadm kubelet kubectl
+          changed_when: true
+
+        - name: Install kubeadm {{ k8s_target }}
+          ansible.builtin.apt:
+            name: "kubeadm={{ pkg }}"
+            update_cache: true
+
+        - name: kubeadm upgrade plan (first control plane)
+          ansible.builtin.command: kubeadm upgrade plan v{{ k8s_target }}
+          when: inventory_hostname == first_cp
+          register: plan
+          changed_when: false
+
+        - name: kubeadm upgrade apply (first control plane)
+          ansible.builtin.command: kubeadm upgrade apply v{{ k8s_target }} --yes
+          when: inventory_hostname == first_cp
+          changed_when: true
+
+        - name: kubeadm upgrade node (other nodes)
+          ansible.builtin.command: kubeadm upgrade node
+          when: inventory_hostname != first_cp
+          changed_when: true
+
+        - name: Drain (times out instead of hanging on a PDB)
+          ansible.builtin.command: >-
+            {{ kubectl }} drain {{ inventory_hostname }} --ignore-daemonsets
+            --delete-emptydir-data --timeout=300s
+          delegate_to: "{{ first_cp }}"
+          changed_when: true
+
+        - name: Install kubelet and kubectl {{ k8s_target }}
+          ansible.builtin.apt:
+            name: ["kubelet={{ pkg }}", "kubectl={{ pkg }}"]
+
+        - name: Hold the Kubernetes packages again
+          ansible.builtin.command: apt-mark hold kubeadm kubelet kubectl
+          changed_when: true
+
+        - name: Restart kubelet
+          ansible.builtin.systemd_service:
+            name: kubelet
+            state: restarted
+            daemon_reload: true
+
+        - name: Node is Ready at the target version
+          # Single-quoted: the command module splits like a shell, and unquoted "Ready" loses its quotes.
+          ansible.builtin.command: >-
+            {{ kubectl }} get node {{ inventory_hostname }}
+            -o 'jsonpath={.status.nodeInfo.kubeletVersion}/{.status.conditions[?(@.type=="Ready")].status}'
+          delegate_to: "{{ first_cp }}"
+          register: node_state
+          until: node_state.stdout == "v" + k8s_target + "/True"
+          retries: 30
+          delay: 10
+          changed_when: false
+
+      always:
+        - name: Uncordon (also after a failed step, so the node is not left out of scheduling)
+          ansible.builtin.command: "{{ kubectl }} uncordon {{ inventory_hostname }}"
+          delegate_to: "{{ first_cp }}"
+          changed_when: true
