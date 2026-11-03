@@ -14,7 +14,7 @@ resource "azurerm_storage_account" "lab" {
     # floci-az 0.15.0 does not persist these (FINDINGS.md F-04/F-05): it reports
     # TLS1_0 / HTTP allowed / public nested items and "Account" encryption keys,
     # which would replace the account on every plan. Remove on real Azure.
-    ignore_changes = [
+    ignore_changes = [ # devops:approved-ignore floci-az does not persist these (F-04/F-05)
       min_tls_version, https_traffic_only_enabled, allow_nested_items_to_be_public,
       queue_encryption_key_type, table_encryption_key_type,
       tags, # PATCH drops tags (F-10)
@@ -64,7 +64,7 @@ resource "azurerm_key_vault" "lab" {
 
   lifecycle {
     # floci-az reports retention 90 (F-06) and drops access policies + tags (F-09)
-    ignore_changes = [soft_delete_retention_days, access_policy, tags]
+    ignore_changes = [soft_delete_retention_days, access_policy, tags] # devops:approved-ignore floci-az drops them (F-06/F-09)
   }
 }
 

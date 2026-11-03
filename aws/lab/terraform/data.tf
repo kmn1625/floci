@@ -112,7 +112,7 @@ resource "aws_elasticache_replication_group" "cache" {
   automatic_failover_enabled = false
 
   lifecycle {
-    ignore_changes = [security_group_ids] # not persisted by Floci (A-05)
+    ignore_changes = [security_group_ids] # devops:approved-ignore not persisted by Floci (A-05)
   }
 }
 

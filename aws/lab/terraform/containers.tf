@@ -83,6 +83,7 @@ resource "aws_eks_access_entry" "admin" {
 }
 
 resource "aws_eks_access_policy_association" "admin" {
+  # devops:approved-privilege lab deployer is the cluster admin (emulator lab only)
   count         = var.include_known_emulator_gaps ? 1 : 0 # AssociateAccessPolicy not implemented (A-18)
   cluster_name  = aws_eks_cluster.lab.name
   principal_arn = aws_eks_access_entry.admin.principal_arn

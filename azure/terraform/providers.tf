@@ -5,9 +5,8 @@ provider "azurerm" {
     key_vault {
       purge_soft_delete_on_destroy = true
     }
-    resource_group {
-      prevent_deletion_if_contains_resources = false
-    }
+    # resource_group.prevent_deletion_if_contains_resources stays at its default (true): no FINDING
+    # needed it off, and off lets a destroy delete resources Terraform does not manage (AZ-R05).
   }
 
   use_cli       = false
