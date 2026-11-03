@@ -63,7 +63,7 @@ kubectl -n argocd port-forward svc/argocd-server 8443:443        # https://local
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}'   # base64
 ```
 
-3 Ubuntu 24.04 VMs; cloud-init installs containerd and kubeadm/kubelet/kubectl 1.36.6; Ansible (run on
+3 Ubuntu 24.04 VMs; cloud-init installs containerd and kubeadm/kubelet/kubectl 1.37.2; Ansible (run on
 the control plane) does `kubeadm init`, Calico v3.33.0, worker join and Argo CD v3.5.6. Argo CD's root app
 syncs `k8s/argocd/apps` from this repo: `platform` (namespaces, cluster RBAC, quota, limits, default-deny)
 and `hello-api` (image `ghcr.io/kmn1625/hello-api` by digest). Verified: all Synced/Healthy, NetworkPolicy

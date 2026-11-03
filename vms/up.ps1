@@ -5,7 +5,7 @@
 .DESCRIPTION
   1. Lab SSH key (vms/.keys, gitignored) and cloud-init with that key.
   2. Three Ubuntu 24.04 VMs: k8s-cp1 (control plane), k8s-w1, k8s-w2.
-     cloud-init installs containerd + kubeadm/kubelet/kubectl 1.36.6 (vms/cloud-init).
+     cloud-init installs containerd + kubeadm/kubelet/kubectl 1.37.2 (vms/cloud-init).
   3. Ansible (vms/ansible) runs ON k8s-cp1: kubeadm init, Calico, worker join,
      Argo CD, and the GitOps root app that syncs k8s/argocd/apps from GitHub.
   4. Copies the admin kubeconfig to vms/.keys/kubeconfig.
