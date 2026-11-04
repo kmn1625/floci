@@ -8,6 +8,9 @@ metadata:
 spec:
   replicas: 2
   revisionHistoryLimit: 5
+  # Longer than the liveness window (10 s x 3): a pod that is Ready and then fails liveness never
+  # counts as available, so it cannot replace the old pods (deploy drill R3: 4 min outage without it)
+  minReadySeconds: 45
   selector:
     matchLabels:
       app: hello-api
