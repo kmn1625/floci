@@ -19,7 +19,7 @@ spec:
   template:
     metadata:
       annotations:
-        floci-lab/deploy-drill: r2  # deploy drills: a pod-template change, same image
+        floci-lab/deploy-drill: z1b # deploy drills: a pod-template change, same image
       labels:
         app: hello-api
     spec:
@@ -45,7 +45,6 @@ spec:
       containers:
         - name: hello-api
           image: hello-api # set per overlay (registry + digest)
-          args: ["-drill-bad-flag"]  # drill R2: the binary exits at start (CrashLoopBackOff)
           imagePullPolicy: IfNotPresent
           # Keep serving while the endpoint removal reaches every node's kube-proxy. Without it
           # a drain cost 7 failed requests in 6 s: SIGTERM closed the listener at once (1.37
