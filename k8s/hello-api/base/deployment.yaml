@@ -22,7 +22,7 @@ spec:
   template:
     metadata:
       annotations:
-        floci-lab/deploy-drill: z1b # deploy drills: a pod-template change, same image
+        floci-lab/deploy-drill: r3b # deploy drills: a pod-template change, same image
       labels:
         app: hello-api
     spec:
@@ -78,7 +78,7 @@ spec:
               drop: ["ALL"]
           livenessProbe:
             httpGet:
-              path: /healthz
+              path: /livez  # drill R3b: the app has no /livez (404); readiness still passes
               port: http
             periodSeconds: 10
           readinessProbe:
