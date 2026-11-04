@@ -81,8 +81,10 @@ Rolling back:
     connection lost`.
   - In R3b, the crash-looping pod stayed in the EndpointSlice as ready until the controller-manager came
     back.
-  - Fix, still to do: give k8s-cp1 4 GB (`multipass set local.k8s-cp1.memory=4G` while it is stopped), and
-    run the load from somewhere other than the control plane.
+  - Fixed on 4 Nov: k8s-cp1 now has 4 GB (`multipass set local.k8s-cp1.memory=4G` while it is stopped).
+    6 minutes after the restart there were no new control-plane restarts, load was 0.86 (20-27 during the
+    drills) and 1.9 GB was in use. Still to do: run the load from somewhere other than the control plane.
 - **D-08** After a laptop restart, the Default Switch gave all 3 VMs new IPs. The certificates and kubeconfigs
   point at k8s-cp1's first IP. The workaround is in the README. The drill's IP-based NetworkPolicy
-  (`hello/upgrade-probe-from-cp1`) also had to allow k8s-cp1's new address.
+  (`hello/upgrade-probe-from-cp1`) also had to allow k8s-cp1's new address. That policy and the load
+  files on k8s-cp1 were removed after the drills. Recreate the policy to rerun them.
