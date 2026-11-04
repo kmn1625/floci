@@ -19,7 +19,7 @@ spec:
   template:
     metadata:
       annotations:
-        floci-lab/deploy-drill: z1  # deploy drills: a pod-template change, same image
+        floci-lab/deploy-drill: z1b # deploy drills: a pod-template change, same image
       labels:
         app: hello-api
     spec:
