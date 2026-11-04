@@ -8,13 +8,16 @@ devops-project repo (§K019, §K020, `runbooks/bad-deploy-rollback.md`).
 ## Setup
 - `hello-api`: 2 replicas, RollingUpdate `maxSurge: 1, maxUnavailable: 0`, readiness `/readyz` every 5 s,
   liveness `/healthz` every 10 s, preStop sleep 10 s, grace period 25 s, a PDB that allows 1.
-- Load (`vms/drills/load.py`): 6 workers on k8s-cp1 through the Service's ClusterIP, 65-75 requests/s.
+- Load (`vms/drills/load.py`): 6 workers through the Service's ClusterIP, 65-75 requests/s. The drills below
+  ran it on k8s-cp1. `start.sh` now runs it in a pod (`drill-load`) on a worker, away from hello-api's pods
+  (D-07).
   - `new`: a new connection per request.
   - `ka`: keep-alive, no retry.
   - `kar`: keep-alive, and one retry of the GET when the server closed the reused connection. This is
     RFC 9112 §9.3.1 behaviour, the same as Go's Transport, browsers and Envoy.
 - `vms/drills/start.sh NAME` / `stop.sh NAME` (as root on k8s-cp1) record the load and a 2 s timeline of the
-  Deployment and the Argo CD app, then summarize both.
+  Deployment and the Argo CD app, then summarize both. `stop.sh` removes the load pod, its ConfigMap and its
+  NetworkPolicy.
 
 ```bash
 multipass transfer vms/drills/load.py k8s-cp1:/home/ubuntu/drills/   # and summarize.py, start.sh, stop.sh
@@ -83,8 +86,10 @@ Rolling back:
     back.
   - Fixed on 4 Nov: k8s-cp1 now has 4 GB (`multipass set local.k8s-cp1.memory=4G` while it is stopped).
     6 minutes after the restart there were no new control-plane restarts, load was 0.86 (20-27 during the
-    drills) and 1.9 GB was in use. Still to do: run the load from somewhere other than the control plane.
+    drills) and 1.9 GB was in use. The load now runs in a pod on a worker (`start.sh`).
 - **D-08** After a laptop restart, the Default Switch gave all 3 VMs new IPs. The certificates and kubeconfigs
-  point at k8s-cp1's first IP. The workaround is in the README. The drill's IP-based NetworkPolicy
-  (`hello/upgrade-probe-from-cp1`) also had to allow k8s-cp1's new address. That policy and the load
-  files on k8s-cp1 were removed after the drills. Recreate the policy to rerun them.
+  point at k8s-cp1's first IP. The drill's IP-based NetworkPolicy (`hello/upgrade-probe-from-cp1`) also had
+  to allow k8s-cp1's new address.
+  - Fixed on 4 Nov: the nodes have static IPs on the `k8s-lab` switch (README, [vms/reip](reip/README.md)).
+  - The load pod sits in namespace hello, which hello-api's policy already admits, so the IP-based policy is
+    gone. It and the load files on k8s-cp1 were removed after the drills.

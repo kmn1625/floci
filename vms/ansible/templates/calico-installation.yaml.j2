@@ -4,6 +4,8 @@ metadata:
   name: default
 spec:
   calicoNetwork:
+    nodeAddressAutodetectionV4:   # the k8s-lab NIC, not the Default Switch one (vms/lab-network.ps1)
+      cidrs: ["{{ lab_cidr }}"]
     ipPools:
       - name: default-ipv4-ippool
         cidr: {{ pod_cidr }}

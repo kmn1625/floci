@@ -3,8 +3,10 @@
   Real VMs + kubeadm Kubernetes + Argo CD for the floci lab (Windows: Hyper-V + Multipass).
 
 .DESCRIPTION
+  0. Needs the k8s-lab switch first: run vms/lab-network.ps1 once as administrator.
   1. Lab SSH key (vms/.keys, gitignored) and cloud-init with that key.
-  2. Three Ubuntu 24.04 VMs: k8s-cp1 (control plane), k8s-w1, k8s-w2.
+  2. Three Ubuntu 24.04 VMs: k8s-cp1 (control plane), k8s-w1, k8s-w2. Each gets a second NIC on k8s-lab with
+     a fixed MAC and a static IP (k8s-cp1 10.77.0.10, workers .11 and up), which survives host restarts.
      cloud-init installs containerd + kubeadm/kubelet/kubectl 1.37.2 (vms/cloud-init).
   3. Ansible (vms/ansible) runs ON k8s-cp1: kubeadm init, Calico, worker join,
      Argo CD, and the GitOps root app that syncs k8s/argocd/apps from GitHub.
@@ -22,7 +24,9 @@ param(
   [string]$WorkerMemory = "2G",
   [int]$Cpus = 2,
   [string]$Disk = "15G",
-  [string[]]$Workers = @("k8s-w1", "k8s-w2")
+  [string[]]$Workers = @("k8s-w1", "k8s-w2"),
+  [string]$Switch = "k8s-lab",
+  [string]$IpPrefix = "10.77.0."
 )
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -33,6 +37,9 @@ $mp = (Get-Command multipass -ErrorAction SilentlyContinue).Source
 if (-not $mp) { $mp = "$env:ProgramFiles\Multipass\bin\multipass.exe" }
 if (-not (Test-Path $mp)) { throw "Multipass not found. Install: winget install Canonical.Multipass (needs Hyper-V + reboot)." }
 function Invoke-Multipass { & $mp @args; if ($LASTEXITCODE -ne 0) { throw "multipass $($args -join ' ') failed ($LASTEXITCODE)" } }
+if (-not ((& $mp networks --format json | ConvertFrom-Json).list.name -contains $Switch)) {
+  throw "Hyper-V switch $Switch not found. Run once as administrator: vms/lab-network.ps1"
+}
 
 # 1. key + cloud-init ---------------------------------------------------------
 New-Item -ItemType Directory -Force $keys | Out-Null
@@ -49,14 +56,19 @@ $cloudInit = Join-Path $keys "k8s-node.rendered.yaml"
 # 2. VMs ----------------------------------------------------------------------
 $existing = (& $mp list --format json | ConvertFrom-Json).list.name
 $nodes = @(@{ name = $cp; mem = $CpMemory }) + ($Workers | ForEach-Object { @{ name = $_; mem = $WorkerMemory } })
+$i = 10
+foreach ($n in $nodes) { $n.ip = "$IpPrefix$i"; $n.mac = "52:54:00:77:00:{0:x2}" -f $i; $i++ }
 foreach ($n in $nodes) {
   if ($existing -contains $n.name) { Write-Host "[keep]   $($n.name)"; continue }
-  Write-Host "[launch] $($n.name) ($Cpus CPU, $($n.mem), $Disk)"
-  Invoke-Multipass launch $Image --name $n.name --cpus $Cpus --memory $n.mem --disk $Disk --cloud-init $cloudInit --timeout 1200
+  Write-Host "[launch] $($n.name) ($Cpus CPU, $($n.mem), $Disk, $($n.ip))"
+  Invoke-Multipass launch $Image --name $n.name --cpus $Cpus --memory $n.mem --disk $Disk --cloud-init $cloudInit `
+    --network "name=$Switch,mode=manual,mac=$($n.mac)" --timeout 1200
+  # Static address on the k8s-lab NIC, matched by MAC; no gateway, internet stays on the Default Switch NIC.
+  $netplan = "network:`n  version: 2`n  ethernets:`n    k8s-lab:`n      match:`n        macaddress: `"$($n.mac)`"`n" +
+             "      addresses: [$($n.ip)/24]`n      dhcp4: false`n      dhcp6: false`n      link-local: []`n"
+  Invoke-Multipass exec $n.name '--' sudo bash -c "printf '%s' '$netplan' > /etc/netplan/60-k8s-lab.yaml && chmod 600 /etc/netplan/60-k8s-lab.yaml && netplan apply"
 }
-
-$info = (& $mp info --format json ($nodes | ForEach-Object { $_.name }) | ConvertFrom-Json).info
-function ip($name) { ($info.$name.ipv4 | Select-Object -First 1) }
+function ip($name) { ($nodes | Where-Object { $_.name -eq $name }).ip }
 
 # 3. inventory + Ansible on the control plane -----------------------------------
 $inv = @("[control_plane]", "$cp ansible_host=$(ip $cp)", "", "[workers]") +

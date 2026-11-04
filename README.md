@@ -70,10 +70,11 @@ and `hello-api` (image `ghcr.io/kmn1625/hello-api` by digest). Verified: all Syn
 blocks other namespaces, RBAC roles behave, restricted PSA rejects privileged pods, deleted resources self-heal.
 After a laptop restart the VMs start with Multipass; for the Azure emulator run `bash azure/scripts/recover-after-restart.sh`.
 
-If the restart gave the VMs new IPs (`multipass list`), the API server still answers only on k8s-cp1's first IP,
-172.30.31.168. Until the lab has a static-IP switch, put that IP back as a second address (it is gone on the
-next reboot); the workers and Calico pick up their new IPs on their own:
-`multipass exec k8s-cp1 -- sudo sh -c 'ip addr add 172.30.31.168/20 dev eth0 && systemctl restart kubelet'`.
+The nodes have static IPs on their own Hyper-V switch, `k8s-lab` (10.77.0.0/24): the host is .1, k8s-cp1
+is .10 and the workers are .11 and .12. Create the switch once, as administrator, before `up.ps1`:
+`Start-Process powershell -Verb RunAs -ArgumentList '-ExecutionPolicy Bypass -File vms\lab-network.ps1'`.
+Each VM keeps its Default Switch NIC for internet and multipass; that IP still changes on a restart, but
+the cluster does not use it. To move an existing cluster to new IPs, see [vms/reip](vms/reip/README.md).
 
 Upgrade and deploy drills (zero-downtime rollouts, bad deploys, GitOps rollback), with the scripts to rerun
 them: [vms/DRILLS.md](vms/DRILLS.md).

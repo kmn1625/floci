@@ -1,6 +1,7 @@
 k8s_version: "1.37.2"
 calico_version: v3.33.0
 argocd_version: v3.5.6
+lab_cidr: 10.77.0.0/24         # k8s-lab switch, static node IPs (vms/lab-network.ps1)
 pod_cidr: 192.168.0.0/16
 service_cidr: 10.96.0.0/12
 repo_url: https://github.com/kmn1625/floci.git

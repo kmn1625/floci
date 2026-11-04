@@ -35,6 +35,13 @@
         name: containerd
         state: started
 
+    # The kubelet would pick the Default Switch NIC, whose IP changes on every host restart.
+    - name: kubelet uses the static k8s-lab address
+      ansible.builtin.copy:
+        dest: /etc/default/kubelet
+        content: "KUBELET_EXTRA_ARGS=--node-ip={{ ansible_host }}\n"
+        mode: "0644"
+
 - name: Control plane
   hosts: control_plane
   become: true
