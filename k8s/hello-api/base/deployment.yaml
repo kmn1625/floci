@@ -18,6 +18,8 @@ spec:
       maxSurge: 1
   template:
     metadata:
+      annotations:
+        floci-lab/deploy-drill: z1  # deploy drills: a pod-template change, same image
       labels:
         app: hello-api
     spec:
