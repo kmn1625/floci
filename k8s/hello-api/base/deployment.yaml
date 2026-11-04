@@ -12,14 +12,11 @@ spec:
     matchLabels:
       app: hello-api
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: 0
-      maxSurge: 1
+    type: Recreate  # drill Z2 only: every old pod stops before a new one starts
   template:
     metadata:
       annotations:
-        floci-lab/deploy-drill: z1b # deploy drills: a pod-template change, same image
+        floci-lab/deploy-drill: z2  # deploy drills: a pod-template change, same image
       labels:
         app: hello-api
     spec:
