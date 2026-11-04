@@ -8,7 +8,7 @@ resources:
 images:
   - name: hello-api
     newName: ghcr.io/kmn1625/hello-api
-    digest: sha256:06a03e3721de009766ee788296f23c7438547f73406f8f852eacf1bf8aa279f9 # 0.2.0 (metrics, traces, JSON logs)
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000001 # drill R1: a digest that does not exist
 patches:
   - target:
       kind: Deployment
