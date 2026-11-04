@@ -70,6 +70,14 @@ and `hello-api` (image `ghcr.io/kmn1625/hello-api` by digest). Verified: all Syn
 blocks other namespaces, RBAC roles behave, restricted PSA rejects privileged pods, deleted resources self-heal.
 After a laptop restart the VMs start with Multipass; for the Azure emulator run `bash azure/scripts/recover-after-restart.sh`.
 
+If the restart gave the VMs new IPs (`multipass list`), the API server still answers only on k8s-cp1's first IP,
+172.30.31.168. Until the lab has a static-IP switch, put that IP back as a second address (it is gone on the
+next reboot); the workers and Calico pick up their new IPs on their own:
+`multipass exec k8s-cp1 -- sudo sh -c 'ip addr add 172.30.31.168/20 dev eth0 && systemctl restart kubelet'`.
+
+Upgrade and deploy drills (zero-downtime rollouts, bad deploys, GitOps rollback), with the scripts to rerun
+them: [vms/DRILLS.md](vms/DRILLS.md).
+
 ## Observability (on the kubeadm cluster)
 
 Argo CD installs from pinned Helm charts (`k8s/argocd/apps/observability.yaml`): kube-prometheus-stack 92.16.1
