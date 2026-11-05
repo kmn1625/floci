@@ -1,0 +1,24 @@
+# Pinned versions only stay safe if something moves them. image-scan.yml checks each PR.
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /apps/hello-api
+    schedule: {interval: weekly}
+  - package-ecosystem: docker
+    directory: /toolbox
+    schedule: {interval: weekly}
+  - package-ecosystem: gomod
+    directory: /apps/hello-api
+    schedule: {interval: weekly}
+    groups:
+      hello-api-deps: {patterns: ["*"]}
+  - package-ecosystem: gomod
+    directory: /toolbox/kubectl
+    schedule: {interval: weekly}
+    groups:
+      kubectl-deps: {patterns: ["*"]}
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: weekly}
+    groups:
+      actions: {patterns: ["*"]}

@@ -1,0 +1,47 @@
+# Build and scan the lab images without publishing them: when they change, and nightly, because new
+# CVEs appear after an image passed. Scans a syft SBOM: grype pointed at an image misses Go modules
+# in some binaries (devops-project rules/security.md §S002). Fails on a critical CVE.
+name: image-scan
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - apps/hello-api/**
+      - toolbox/**
+      - .github/workflows/image-scan.yml
+  pull_request:
+    paths:
+      - apps/hello-api/**
+      - toolbox/**
+      - .github/workflows/image-scan.yml
+  schedule:
+    - cron: "45 20 * * *"   # 02:15 IST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        context: [apps/hello-api, toolbox]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683          # v4.2.2
+      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349  # v3.7.1
+      - uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75    # v6.9.0
+        with:
+          context: ${{ matrix.context }}
+          load: true
+          tags: floci-scan:ci
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c  # v0.24.3
+      - run: syft docker:floci-scan:ci -q -o syft-json=sbom.syft.json
+      - uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439                # v7.4.2
+        with:
+          sbom: sbom.syft.json
+          fail-build: true
+          severity-cutoff: critical
+          output-format: table

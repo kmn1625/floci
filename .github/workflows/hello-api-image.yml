@@ -26,16 +26,36 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - id: build
-        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75    # v6.9.0
+      # Build, scan, then push: a critical CVE must stop a public image before it leaves the runner.
+      - uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75    # v6.9.0
         with:
           context: apps/hello-api
-          push: true
+          load: true
           build-args: VERSION=${{ inputs.version }}
           tags: ghcr.io/kmn1625/hello-api:${{ inputs.version }}
           labels: |
             org.opencontainers.image.source=https://github.com/kmn1625/floci
             org.opencontainers.image.version=${{ inputs.version }}
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c  # v0.24.3
+      - name: Inventory the image
+        env:
+          VERSION: ${{ inputs.version }}
+        run: syft "docker:ghcr.io/kmn1625/hello-api:${VERSION}" -q -o syft-json=sbom.syft.json
+      - name: Fail on a critical CVE
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439                # v7.4.2
+        with:
+          sbom: sbom.syft.json
+          fail-build: true
+          severity-cutoff: critical
+          output-format: table
+      - name: Push
+        id: build
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          docker push "ghcr.io/kmn1625/hello-api:${VERSION}"
+          digest=$(docker inspect --format='{{index .RepoDigests 0}}' "ghcr.io/kmn1625/hello-api:${VERSION}")
+          echo "digest=${digest##*@}" >> "$GITHUB_OUTPUT"
       - name: Digest for the kubeadm overlay
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
