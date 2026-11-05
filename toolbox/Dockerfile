@@ -18,7 +18,7 @@ RUN v="v${KUBECTL_VERSION}" major="${KUBECTL_VERSION%%.*}" minor="${KUBECTL_VERS
        done \
     && go build -mod=readonly -ldflags "$ld" -o /out/kubectl .
 
-FROM python:3.12.16-slim@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30
+FROM python:3.15.0-slim@sha256:f5b92f2a669a4c347044f29367f31983280b648250ca94dea66f98c53bc87e58
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
