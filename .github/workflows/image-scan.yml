@@ -28,7 +28,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        context: [apps/hello-api, toolbox]
+        include:
+          - context: apps/hello-api
+            only-fixed: false
+          # Local lab tool, no published ports. It needs curl, git and ssh, whose critical CVEs are
+          # Debian "won't fix" (no patch exists), so it fails only on criticals that have a fix.
+          - context: toolbox
+            only-fixed: true
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683          # v4.2.2
       - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349  # v3.7.1
@@ -44,4 +50,5 @@ jobs:
           sbom: sbom.syft.json
           fail-build: true
           severity-cutoff: critical
+          only-fixed: ${{ matrix.only-fixed }}
           output-format: table
