@@ -1,0 +1,108 @@
+# shop on the lab EKS cluster. The values marked __LIKE_THIS__ come from Terraform outputs (scripts fill them in).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shop
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: shop-db
+  namespace: shop
+type: Opaque
+stringData:
+  DATABASE_URL: __DATABASE_URL__
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shop
+  namespace: shop
+spec:
+  replicas: __REPLICAS__
+  selector:
+    matchLabels:
+      app: shop
+  template:
+    metadata:
+      labels:
+        app: shop
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: shop
+          image: shop:__TAG__
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8000
+          env:
+            - name: STORAGE
+              value: s3
+            - name: S3_BUCKET
+              value: __BUCKET__
+            - name: S3_ENDPOINT
+              value: http://__FLOCI_IP__:4566
+            - name: AWS_REGION
+              value: us-east-1
+            - name: AWS_ACCESS_KEY_ID
+              value: floci
+            - name: AWS_SECRET_ACCESS_KEY
+              value: floci
+            - name: SITE
+              value: aws
+          envFrom:
+            - secretRef:
+                name: shop-db
+          # boto3 is slow to import on a small CPU limit: without this, liveness kills the pod mid-start.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 3
+            timeoutSeconds: 3
+            failureThreshold: 40
+          # Above the app's 3 second database timeout, or a slow database looks like a dead pod.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            periodSeconds: 3
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 200m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shop
+  namespace: shop
+spec:
+  type: NodePort
+  selector:
+    app: shop
+  ports:
+    - port: 80
+      targetPort: 8000
+      nodePort: 30080
