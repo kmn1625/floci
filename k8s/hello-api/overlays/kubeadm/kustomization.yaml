@@ -8,7 +8,7 @@ resources:
 images:
   - name: hello-api
     newName: ghcr.io/kmn1625/hello-api
-    digest: sha256:06a03e3721de009766ee788296f23c7438547f73406f8f852eacf1bf8aa279f9 # 0.2.0 (metrics, traces, JSON logs)
+    digest: sha256:59185d26561a019fd586209c1102a44ca931543c9cd8ce1d77d45376fde5afdf # 0.2.1 (Go and base image CVE fixes)
 patches:
   - target:
       kind: Deployment
