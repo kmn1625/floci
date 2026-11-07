@@ -5,7 +5,11 @@ the awkward parts are on purpose: local disk for files, sequences, a table with 
 business rules that span tables. /verify reports totals that must survive a move.
 """
 import hashlib
+import json
 import os
+import time
+import urllib.error
+import urllib.request
 import uuid
 from functools import cache
 from pathlib import Path
@@ -22,6 +26,13 @@ STORAGE = os.environ.get("STORAGE", "disk")
 if STORAGE not in ("disk", "s3", "azure"):
     # Falling through to disk here is how a first run lost every upload on Azure while health stayed green.
     raise SystemExit(f"unknown STORAGE {STORAGE!r}")
+# How an order takes stock. local: one transaction, as it always was. naive: a call to catalog with a retry, the
+# version most first splits ship. saga: a reservation with a key, settled after the order commits.
+ORDER_MODE = os.environ.get("ORDER_MODE", "local")
+if ORDER_MODE not in ("local", "naive", "saga"):
+    raise SystemExit(f"unknown ORDER_MODE {ORDER_MODE!r}")
+CATALOG_URL = os.environ.get("CATALOG_URL", "")
+FILES_URL = os.environ.get("FILES_URL", "")
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/var/lib/shop/uploads"))
 SITE = os.environ.get("SITE", "onprem")
 MAX_UPLOAD = 2 * 1024 * 1024
@@ -73,6 +84,85 @@ def database_down(_):
     return jsonify(error="database unavailable"), 503
 
 
+@app.errorhandler(psycopg.errors.InsufficientPrivilege)
+def writes_moved(_):
+    return jsonify(error="this table has moved or is being moved"), 503
+
+
+# Retries must fit inside the caller's patience. 3 tries of 2 s outlasted the edge's 5 s: the customer got an error
+# while the order carried on and committed behind them.
+RETRY_BUDGET = float(os.environ.get("RETRY_BUDGET", "3"))
+
+
+def service(url, body=None, attempts=3):
+    """Status and JSON from another service. Failures come back as status 0: the caller decides what they mean."""
+    data = None if body is None else json.dumps(body).encode()
+    status, reply = 0, {}
+    deadline = time.monotonic() + RETRY_BUDGET
+    for attempt in range(attempts):
+        left = deadline - time.monotonic()
+        if left <= 0:
+            break
+        try:
+            req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST" if data is not None or body == {} else "GET")
+            with urllib.request.urlopen(req, timeout=min(1.5, left)) as r:
+                return r.status, json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as exc:
+            status, reply = exc.code, {}
+            if exc.code < 500:
+                return status, reply
+        except OSError:
+            status, reply = 0, {}
+    return status, reply
+
+
+def order_rows(cur, customer_id, priced, key=None):
+    total = sum(line["qty"] * line["price_cents"] for line in priced)
+    cur.execute("insert into orders (customer_id, total_cents, order_key) values (%s, %s, %s) returning id", (customer_id, total, key))
+    order_id = cur.fetchone()[0]
+    cur.executemany("insert into order_items (order_id, product_id, qty, price_cents) values (%s, %s, %s, %s)",
+                    [(order_id, line["product_id"], line["qty"], line["price_cents"]) for line in priced])
+    cur.execute("insert into audit_log (action, detail) values ('order', %s)", (Jsonb({"order": order_id, "total": total}),))
+    return order_id, total
+
+
+def order_naive(body, items):
+    status, reply = service(f"{CATALOG_URL}/stock/take", {"items": items})
+    if status == 409:
+        return jsonify(error="out of stock"), 409
+    if status != 200:
+        return jsonify(error="stock unavailable"), 503
+    with db() as conn, conn.cursor() as cur:
+        order_id, total = order_rows(cur, body["customer_id"], reply["priced"])
+    return jsonify(id=order_id, total_cents=total, site=SITE), 201
+
+
+def order_saga(body, items):
+    key = str(uuid.uuid4())
+    status, reply = service(f"{CATALOG_URL}/reservations", {"key": key, "items": items})
+    if status == 409:
+        return jsonify(error="out of stock"), 409
+    if status not in (200, 201):
+        # It may have worked: the sweeper asks whether this key became an order, finds it did not, and puts the stock back.
+        return jsonify(error="stock unavailable"), 503
+    try:
+        with db() as conn, conn.cursor() as cur:
+            order_id, total = order_rows(cur, body["customer_id"], reply["priced"], key)
+    except psycopg.Error:
+        service(f"{CATALOG_URL}/reservations/{key}/release", {}, attempts=1)  # the sweeper covers this failing too
+        raise
+    service(f"{CATALOG_URL}/reservations/{key}/confirm", {}, attempts=1)  # the order exists: never make the customer wait on this
+    return jsonify(id=order_id, total_cents=total, site=SITE), 201
+
+
+@app.get("/internal/orders/by-key/<uuid:key>")
+def order_by_key(key):
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("select id from orders where order_key = %s", (key,))
+        row = cur.fetchone()
+    return (jsonify(id=row[0]), 200) if row else (jsonify(error="no such order"), 404)
+
+
 @app.get("/health")
 def health():
     return jsonify(status="ok", site=SITE)
@@ -91,6 +181,10 @@ def create_order():
     items = body.get("items") or []
     if not items:
         return jsonify(error="no items"), 400
+    if ORDER_MODE == "naive":
+        return order_naive(body, items)
+    if ORDER_MODE == "saga":
+        return order_saga(body, items)
     with db() as conn, conn.cursor() as cur:
         total = 0
         priced = []
@@ -151,6 +245,8 @@ def get_upload(upload_id):
 @app.get("/verify")
 def verify():
     """Business totals. The stock rule holds only if no write was lost or applied twice."""
+    if CATALOG_URL:
+        return verify_split()
     with db() as conn, conn.cursor() as cur:
         cur.execute("""
             select (select count(*) from orders),
@@ -164,3 +260,24 @@ def verify():
         orders, revenue, items, sold, stock, initial, uploads = cur.fetchone()
     return jsonify(site=SITE, orders=orders, revenue_cents=int(revenue), uploads=uploads,
                    orders_match_items=int(revenue) == int(items), stock_balanced=int(sold) + int(stock) == int(initial))
+
+
+def verify_split():
+    """The same promise, now asked of three owners. One statement used to answer it."""
+    status, catalog = service(f"{CATALOG_URL}/totals", attempts=1)
+    if status != 200:
+        return jsonify(error="catalog unavailable"), 503
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("""select (select count(*) from orders), (select coalesce(sum(total_cents), 0) from orders),
+                              (select coalesce(sum(qty * price_cents), 0) from order_items), (select coalesce(sum(qty), 0) from order_items)""")
+        orders, revenue, items, sold = cur.fetchone()
+        cur.execute("select product_id, sum(qty) from order_items group by product_id")
+        by_product = {str(r[0]): int(r[1]) for r in cur.fetchall()}
+    uploads = None
+    if FILES_URL:
+        status, reply = service(f"{FILES_URL}/totals", attempts=1)
+        uploads = reply.get("uploads") if status == 200 else None
+    drift = {p: catalog["taken"].get(p, 0) - by_product.get(p, 0) for p in catalog["taken"] if catalog["taken"].get(p, 0) != by_product.get(p, 0)}
+    return jsonify(site=SITE, orders=orders, revenue_cents=int(revenue), uploads=uploads, orders_match_items=int(revenue) == int(items),
+                   stock_balanced=int(sold) + catalog["stock"] == catalog["initial"], pending=catalog["pending"],
+                   stock_drift=int(catalog["initial"]) - catalog["stock"] - int(sold), products_drifting=len(drift))

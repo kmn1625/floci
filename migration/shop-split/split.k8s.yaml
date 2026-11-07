@@ -1,0 +1,71 @@
+# Fixed parts of the split: the services in front of the deployments, and the sweeper.
+apiVersion: v1
+kind: Service
+metadata:
+  name: files
+  namespace: shop
+spec:
+  type: NodePort
+  selector:
+    deploy: files
+  ports:
+    - port: 80
+      targetPort: 8000
+      nodePort: 30081
+---
+# Not a NodePort: nothing outside the cluster talks to catalog. Moving its data means moving this selector.
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog
+  namespace: shop
+spec:
+  selector:
+    deploy: catalog
+  ports:
+    - port: 80
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog-sweeper
+  namespace: shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      deploy: catalog-sweeper
+  template:
+    metadata:
+      labels:
+        deploy: catalog-sweeper
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: sweeper
+          image: shop:__TAG__
+          imagePullPolicy: Never
+          command: ["python", "catalog.py"]
+          env:
+            - name: DATABASE_URL
+              value: unused-the-sweeper-only-calls-catalog
+            - name: CATALOG_URL
+              value: http://catalog
+          resources:
+            requests:
+              cpu: 20m
+              memory: 48Mi
+            limits:
+              cpu: 200m
+              memory: 96Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]

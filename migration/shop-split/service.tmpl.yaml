@@ -1,0 +1,80 @@
+# One extracted service. setup.sh renders this per service: the names in __CAPITALS__ are filled in there.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: __NAME__
+  namespace: shop
+spec:
+  replicas: __REPLICAS__
+  selector:
+    matchLabels:
+      deploy: __NAME__
+  template:
+    metadata:
+      labels:
+        deploy: __NAME__
+        app: __SERVICE__
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: __NAME__
+          image: shop:__TAG__
+          imagePullPolicy: Never
+          command: ["python", "-m", "gunicorn", "-w", "2", "-b", "0.0.0.0:8000", "--worker-tmp-dir", "/dev/shm", "--control-socket", "/dev/shm/gunicorn.ctl", "__SERVICE__:app"]
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: split-db
+                  key: __SECRET_KEY__
+            - name: S3_BUCKET
+              value: shop-uploads
+            - name: S3_ENDPOINT
+              value: http://__FLOCI_IP__:4566
+            - name: AWS_REGION
+              value: us-east-1
+            - name: AWS_ACCESS_KEY_ID
+              value: floci
+            - name: AWS_SECRET_ACCESS_KEY
+              value: floci
+            - name: ORDERS_URL
+              value: http://shop
+            - name: FAULT_LOST_ANSWER
+              value: "0"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 3
+            timeoutSeconds: 3
+            failureThreshold: 40
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            periodSeconds: 3
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 96Mi
+            limits:
+              cpu: "1"
+              memory: 200Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]

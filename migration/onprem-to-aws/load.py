@@ -73,6 +73,11 @@ def run(args):
             entry.update(json.loads(raw))
             entry["expect"] = hashlib.sha256(data).hexdigest()
         write(entry)
+        if status == 201 and args.read_back:
+            # A customer opens what they just uploaded. Reads from a replica can miss it.
+            t1 = time.time()
+            got, _ = call(f"{args.url}/uploads/{entry['id']}")
+            write({"t": round(t1, 3), "kind": "readback", "status": got, "ms": round((time.time() - t1) * 1000)})
 
     def worker():
         while running():
@@ -89,6 +94,8 @@ def run(args):
 
 def check(args):
     rows = [json.loads(line) for line in open(args.log, encoding="utf-8")]
+    backs = [r for r in rows if r["kind"] == "readback"]
+    rows = [r for r in rows if r["kind"] != "readback"]
     ok = [r for r in rows if r["status"] == 201]
     bad = [r for r in rows if r["status"] != 201]
     sites = {}
@@ -111,7 +118,8 @@ def check(args):
     report = {"requests": len(rows), "acknowledged": len(ok), "refused_or_failed": len(bad), "by_site": sites,
               "failed_span_seconds": outage, "failures": sorted({r["status"] for r in bad}),
               "acknowledged_but_missing": len(lost), "acknowledged_but_wrong": len(wrong), "could_not_check": len(unchecked),
-              "check_retries": retried, "first_missing": lost[:5], "first_wrong": wrong[:5]}
+              "check_retries": retried, "first_missing": lost[:5], "first_wrong": wrong[:5],
+              "read_back": len(backs), "read_back_failed": sum(1 for r in backs if r["status"] != 200)}
     print(json.dumps(report, indent=1))
     return 1 if lost or wrong or unchecked else 0
 
@@ -127,6 +135,7 @@ def main():
     r.add_argument("--uploads", type=float, default=0.1)
     r.add_argument("--out", required=True)
     r.add_argument("--stop-file", help="stop early once this file exists")
+    r.add_argument("--read-back", action="store_true", help="read each upload straight after making it")
     c = sub.add_parser("check")
     c.add_argument("--url", required=True)
     c.add_argument("--log", required=True)
