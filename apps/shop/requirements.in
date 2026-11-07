@@ -2,3 +2,4 @@ flask
 gunicorn
 psycopg[binary]
 boto3
+azure-storage-blob==12.31.1

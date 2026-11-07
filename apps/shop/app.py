@@ -7,16 +7,21 @@ business rules that span tables. /verify reports totals that must survive a move
 import hashlib
 import os
 import uuid
+from functools import cache
 from pathlib import Path
 
 import boto3
 import psycopg
+from azure.storage.blob import BlobServiceClient
 from flask import Flask, Response, jsonify, request
 from psycopg.types.json import Jsonb
 
 app = Flask(__name__)
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://shop:shop@127.0.0.1:5432/shop")
 STORAGE = os.environ.get("STORAGE", "disk")
+if STORAGE not in ("disk", "s3", "azure"):
+    # Falling through to disk here is how a first run lost every upload on Azure while health stayed green.
+    raise SystemExit(f"unknown STORAGE {STORAGE!r}")
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/var/lib/shop/uploads"))
 SITE = os.environ.get("SITE", "onprem")
 MAX_UPLOAD = 2 * 1024 * 1024
@@ -31,8 +36,17 @@ def bucket():
     return client, os.environ["S3_BUCKET"]
 
 
+@cache
+def blobs():
+    # Real Azure would use a managed identity here. floci-az does not check keys, so the lab cannot test that.
+    account = {"account_name": os.environ["BLOB_ACCOUNT"], "account_key": os.environ["BLOB_KEY"]}
+    return BlobServiceClient(os.environ["BLOB_URL"], credential=account).get_container_client(os.environ["BLOB_CONTAINER"])
+
+
 def store(key, data):
-    if STORAGE == "s3":
+    if STORAGE == "azure":
+        blobs().upload_blob(key, data, overwrite=True)
+    elif STORAGE == "s3":
         client, name = bucket()
         client.put_object(Bucket=name, Key=key, Body=data)
     else:
@@ -41,6 +55,8 @@ def store(key, data):
 
 
 def fetch(key):
+    if STORAGE == "azure":
+        return blobs().download_blob(key).readall()
     if STORAGE == "s3":
         client, name = bucket()
         return client.get_object(Bucket=name, Key=key)["Body"].read()
