@@ -16,6 +16,7 @@ spec:
         app: __SERVICE__
     spec:
       automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30   # >= the preStop below + gunicorn's own shutdown (§K019)
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -73,6 +74,12 @@ spec:
             limits:
               cpu: "1"
               memory: 200Mi
+          # Keep serving until every node stops routing here. Without it each rolling restart of the shop dropped
+          # 5 orders with a 502 (merge drill, 8 Nov): the pod stopped while kube-proxy still sent it traffic.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 10
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

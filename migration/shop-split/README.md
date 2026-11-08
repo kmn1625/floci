@@ -107,8 +107,10 @@ What a merge has to undo, found by reading before running:
   monolith with the right bytes before any traffic moved.
 
 What went wrong: **each rolling restart of the shop dropped orders.** 5 orders failed with a 502 in each of the two restarts (one
-for the order mode, one for the files link). The shop has no preStop drain, so a pod stops while traffic still reaches it. The 7
-refused uploads all fall inside the 7 s file freeze, as designed.
+for the order mode, one for the files link). The shop had no preStop drain, so a pod stopped while traffic still reached it.
+devops-project's own `validate-k8s` fails these manifests on exactly that (§K019): the drill had never run them through it. With
+`preStop: sleep 10` and a 30 s grace period, two rolling restarts under load gave **716 of 716** requests, none refused. The 7
+refused uploads all fall inside the 7 s file freeze, as designed. `split.sh catalog-back` now also gives back the rights it took.
 
 Not tested: going back out to the services after the merge. The files database is read-only and replicating, and the
 deployments are at 0, but that path has not been run.

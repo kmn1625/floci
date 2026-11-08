@@ -149,6 +149,9 @@ catalog_back() {
   # The gate's restored check found it missing after the 7 Nov rollback. NOT VALID first: no long lock under traffic.
   [ "$(sql shop "select count(*) from pg_constraint where conname = 'order_items_product_id_fkey'")" = 1 ]     || sql shop "alter table order_items add constraint order_items_product_id_fkey foreign key (product_id) references products (id) not valid"
   sql shop "alter table order_items validate constraint order_items_product_id_fkey"
+  stamp "give back the rights the move took: the monolith updates stock itself if catalog is ever merged back"
+  # The 7 Nov rollback left shop_app with only SELECT on products; the 8 Nov merge found it before any order failed.
+  sql shop "grant select, insert, update, delete on products to shop_app"
   stamp "catalog is back on the shared database"
 }
 catalog_refreeze_back() { sql postgres "alter role catalog_app in database $CATALOG_DB reset default_transaction_read_only"; }
