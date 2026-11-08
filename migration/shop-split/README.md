@@ -57,6 +57,34 @@ connection per request. It was left in so the script matches what ran.
 The 111 refused requests fall mostly inside those freezes. The rest came from rolling restarts and lost answers: 17 were
 connection failures while pods restarted.
 
+## The split gate, on real runs (8 Nov)
+
+`gate-run.sh <name>` collects every file `migration-cutover-gate.py --split` reads, from the drill itself: a baseline
+snapshot, the split check with a decision per seam (`split-decisions.json`), an attack drill, a frozen per-item
+reconciliation, the catalog move and rollback under load, and the restored check. `evidence.py` turns the load logs, the
+load check, the orders' `created_at` and catalog's access log into JSON. Nothing is typed in by hand.
+
+| | Run r2 | Run r3, rollback fixed |
+|---|---|---|
+| Attack: orders acknowledged / answers lost after commit / pods killed | 229 of 229 / 20 / 5 | 271 of 271 / 23 / 5 |
+| Errored for the customer but committed | 0 | 0 |
+| Reconciliation while frozen | 50 of 50 products | 50 of 50 products |
+| Move and back under load: acknowledged, lost | 278, 0 | 306, 0 |
+| Restored check against the baseline | **FAIL: `order_items_product_id_fkey` gone** | 11 of 11 |
+| Gate | refused: restored, monitoring, approval | refused: monitoring, approval |
+
+Run r2 is the 7 Nov bug caught: `split.sh catalog` drops the key to products before the data moves, and `catalog-back`
+never put it back. Every other check passed, and the old shop would have run on without it. `catalog-back` now restores
+it (`NOT VALID`, then `VALIDATE`, so no long lock under traffic) and r3 passes. Monitoring and approval stay refused: nobody
+watched or approved a lab run, and the gate is right not to take the script's word for it.
+
+The same reconciliation on the naive design, 60 s with 5% of answers lost: 252 of 253 orders succeeded, and 15 of 50
+products drifted, 50 units in all. `migration-reconcile` names each one.
+
+Each run moves catalog into a database of its own (`CATALOG_DB=catalog_<run>`): `split.sh` reuses a database that already
+has tables, and the last run's copy is stale. The move now proves `catalog-next` can do its job on its own database first:
+it reads products and holds the grants it needs, without writing to the target before cutover.
+
 ## What went wrong on the way
 
 | Trap | What happened |
@@ -74,8 +102,8 @@ a real replica this can happen, and the edge keeps a fallback to the old service
 
 - Real networks. Everything shares one host, so latency, partitions and real timeouts are simulated at best.
 - Several services' worth of size. One database cluster holds all three databases, on one laptop.
-- Contract: the old `uploads` table and the monolith's unused code are still there, and the key to `products` was dropped and not
-  put back after the rollback. Removing the old path is its own risky step and has not been rehearsed.
+- Contract: the old `uploads` table and the monolith's unused code are still there. Removing the old path is its own risky
+  step and has not been rehearsed. (The key to `products` the 7 Nov rollback left dropped is restored now: see above.)
 - Going forward again after the catalog rollback.
 - Customers retrying. `load.py` never retries an order, so a customer who resubmits after a timeout can still order twice.
 - An order can still commit while the customer gets an error, if a pod dies at that moment. This drill did not measure how

@@ -3,8 +3,10 @@
 #   bash split.sh files          the easy seam: uploads, no key and no shared transaction
 #   bash split.sh catalog        the hard seam: stock, already behind an API, now moves its data
 #   bash split.sh catalog-back   undo that move, keeping what was written since
+# CATALOG_DB names catalog's own database (default catalog). A re-run needs a new one: the old one still holds the last run.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
+CATALOG_DB=${CATALOG_DB:-catalog}
 APP=$(cat "$DRILL/app.pw")
 PW=$(cat "$DRILL/repl.pw")
 
@@ -75,51 +77,67 @@ catalog_move() {
   sql shop "alter table order_items drop constraint if exists order_items_product_id_fkey"
   sql shop "revoke update, insert, delete on products from shop_app"
   stamp "a database of its own, replicating. The new deployment starts read-only"
-  new_db catalog products reservations
-  sql catalog "grant usage on schema public to catalog_app, mig_repl"
-  sql catalog "grant select, update on products to catalog_app"
-  sql catalog "grant select, insert, update on reservations to catalog_app"
-  sql catalog "grant select on products, reservations to mig_repl"
-  sql postgres "alter role catalog_app in database catalog set default_transaction_read_only = on"
+  new_db "$CATALOG_DB" products reservations
+  sql "$CATALOG_DB" "grant usage on schema public to catalog_app, mig_repl"
+  sql "$CATALOG_DB" "grant select, update on products to catalog_app"
+  sql "$CATALOG_DB" "grant select, insert, update on reservations to catalog_app"
+  sql "$CATALOG_DB" "grant select on products, reservations to mig_repl"
+  sql postgres "alter role catalog_app in database $CATALOG_DB set default_transaction_read_only = on"
   [ "$(sql shop "select count(*) from pg_publication where pubname = 'catalog_pub'")" = 1 ] || sql shop "create publication catalog_pub for table products, reservations"
-  [ "$(sql catalog "select count(*) from pg_subscription where subname = 'catalog_sub'")" = 1 ] || subscribe shop catalog catalog_sub catalog_pub
-  for _ in $(seq 1 60); do [ "$(sql catalog "select count(*) from pg_subscription_rel where srsubstate <> 'r'")" = 0 ] && break; sleep 1; done
+  [ "$(sql "$CATALOG_DB" "select count(*) from pg_subscription where subname = 'catalog_sub'")" = 1 ] || subscribe shop "$CATALOG_DB" catalog_sub catalog_pub
+  for _ in $(seq 1 60); do [ "$(sql "$CATALOG_DB" "select count(*) from pg_subscription_rel where srsubstate <> 'r'")" = 0 ] && break; sleep 1; done
   k scale deploy/catalog-next --replicas=2 >/dev/null
   k rollout status deploy/catalog-next --timeout=240s | tail -1
+
+  stamp "prove the new deployment reaches its database through its own code, and may write what it must once opened"
+  # Writing now would put rows on the target before cutover (M007): prove the connection and the grants instead.
+  docker exec -i "$EKS" kubectl -n shop exec -i deploy/catalog-next -- python - > "$DRILL/catalog-proof.json" <<'PY'
+import catalog, json
+with catalog.db() as conn:
+    one = lambda q: conn.execute(q).fetchone()[0]
+    proved = {"catalog-next reads products": one("select count(*) from products") > 0,
+              "catalog_app may update products": one("select has_table_privilege(current_user, 'products', 'UPDATE')"),
+              "catalog_app may insert reservations": one("select has_table_privilege(current_user, 'reservations', 'INSERT')"),
+              "catalog_app may update reservations": one("select has_table_privilege(current_user, 'reservations', 'UPDATE')"),
+              "connected to its own database": one("select current_database()") != "shop"}
+print(json.dumps(proved))
+PY
+  "$PYTHON" -c "import json,sys,datetime; p=json.load(open(sys.argv[1])); json.dump({'checkedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'proved': p}, open(sys.argv[2], 'w'), indent=2); print(p); sys.exit(0 if all(p.values()) else 1)" \
+    "$DRILL_WIN/catalog-proof.json" "$DRILL_WIN/catalog-target-smoke.json" || { echo "STOP: catalog-next cannot do its job on its own database" >&2; exit 1; }
 
   stamp "FREEZE stock: orders are refused, nothing else is"
   undo=catalog_unfreeze
   sql postgres "alter role catalog_app in database shop set default_transaction_read_only = on"
   sql shop "select count(pg_terminate_backend(pid)) from pg_stat_activity where datname = 'shop' and usename = 'catalog_app'" >/dev/null
-  caught_up shop catalog catalog_sub
+  caught_up shop "$CATALOG_DB" catalog_sub
   stamp "copy the sequence, forward only"
-  sql catalog "$(sql shop "select string_agg(format('select setval(%L, greatest(%s, (select last_value from %s)))', 'public.' || sequencename, coalesce(last_value, 1) + 1000, 'public.' || sequencename), ';') from pg_sequences where schemaname = 'public' and sequencename = 'products_id_seq'")" >/dev/null
+  sql "$CATALOG_DB" "$(sql shop "select string_agg(format('select setval(%L, greatest(%s, (select last_value from %s)))', 'public.' || sequencename, coalesce(last_value, 1) + 1000, 'public.' || sequencename), ';') from pg_sequences where schemaname = 'public' and sequencename = 'products_id_seq'")" >/dev/null
   stamp "compare the tables that moved"
-  data_check shop catalog products,reservations --frozen --opened
+  data_check shop "$CATALOG_DB" products,reservations --frozen --opened
   stamp "stop replicating, start the way back, open and point the service at the new database"
-  sql catalog "drop subscription catalog_sub" 2>/dev/null
-  sql catalog "create publication catalog_back_pub for table products, reservations"
-  subscribe catalog shop catalog_back_sub catalog_back_pub "copy_data = false, origin = none"
+  sql "$CATALOG_DB" "drop subscription catalog_sub" 2>/dev/null
+  sql "$CATALOG_DB" "create publication catalog_back_pub for table products, reservations"
+  subscribe "$CATALOG_DB" shop catalog_back_sub catalog_back_pub "copy_data = false, origin = none"
   undo=""
-  sql postgres "alter role catalog_app in database catalog reset default_transaction_read_only"
-  docker exec "$RDS" psql -U shopadmin -d catalog -qc "select pg_terminate_backend(pid) from pg_stat_activity where datname = 'catalog' and usename = 'catalog_app'" >/dev/null
+  sql postgres "alter role catalog_app in database $CATALOG_DB reset default_transaction_read_only"
+  docker exec "$RDS" psql -U shopadmin -d "$CATALOG_DB" -qc "select pg_terminate_backend(pid) from pg_stat_activity where datname = '$CATALOG_DB' and usename = 'catalog_app'" >/dev/null
   k patch service catalog -p '{"spec":{"selector":{"deploy":"catalog-next"}}}' >/dev/null
   stamp "catalog is its own service"
 }
 catalog_unfreeze() { sql postgres "alter role catalog_app in database shop reset default_transaction_read_only"; }
 
 catalog_back() {
-  [ "$(sql catalog "select count(*) from pg_replication_slots where slot_name = 'catalog_back_sub' and active")" = 1 ] || {
+  [ "$(sql "$CATALOG_DB" "select count(*) from pg_replication_slots where slot_name = 'catalog_back_sub' and active")" = 1 ] || {
     echo "STOP: nothing is replicating back, so there is no safe rollback from here." >&2
     exit 1
   }
   stamp "FREEZE stock on the new database"
   undo=catalog_refreeze_back
-  sql postgres "alter role catalog_app in database catalog set default_transaction_read_only = on"
-  sql catalog "select count(pg_terminate_backend(pid)) from pg_stat_activity where datname = 'catalog' and usename = 'catalog_app'" >/dev/null
-  caught_up catalog shop catalog_back_sub
+  sql postgres "alter role catalog_app in database $CATALOG_DB set default_transaction_read_only = on"
+  sql "$CATALOG_DB" "select count(pg_terminate_backend(pid)) from pg_stat_activity where datname = '$CATALOG_DB' and usename = 'catalog_app'" >/dev/null
+  caught_up "$CATALOG_DB" shop catalog_back_sub
   stamp "compare, going back"
-  data_check catalog shop products,reservations --frozen --opened
+  data_check "$CATALOG_DB" shop products,reservations --frozen --opened
   stamp "stop replicating, open the old database, point the service back"
   sql shop "drop subscription catalog_back_sub" 2>/dev/null
   undo=""
@@ -127,9 +145,13 @@ catalog_back() {
   k patch service catalog -p '{"spec":{"selector":{"deploy":"catalog"}}}' >/dev/null
   k rollout restart deploy/catalog >/dev/null
   k rollout status deploy/catalog --timeout=240s | tail -1
+  stamp "put back the key the move dropped: both tables share a database again, so it can be enforced again"
+  # The gate's restored check found it missing after the 7 Nov rollback. NOT VALID first: no long lock under traffic.
+  [ "$(sql shop "select count(*) from pg_constraint where conname = 'order_items_product_id_fkey'")" = 1 ]     || sql shop "alter table order_items add constraint order_items_product_id_fkey foreign key (product_id) references products (id) not valid"
+  sql shop "alter table order_items validate constraint order_items_product_id_fkey"
   stamp "catalog is back on the shared database"
 }
-catalog_refreeze_back() { sql postgres "alter role catalog_app in database catalog reset default_transaction_read_only"; }
+catalog_refreeze_back() { sql postgres "alter role catalog_app in database $CATALOG_DB reset default_transaction_read_only"; }
 
 case "${1:-}" in
   files) files_move ;;
