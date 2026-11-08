@@ -85,6 +85,34 @@ Each run moves catalog into a database of its own (`CATALOG_DB=catalog_<run>`): 
 has tables, and the last run's copy is stale. The move now proves `catalog-next` can do its job on its own database first:
 it reads products and holds the grants it needs, without writing to the target before cutover.
 
+## And back: the services into the monolith (8 Nov)
+
+`merge-run.sh <name>` runs `merge.sh catalog` then `merge.sh files` with customers shopping and reading their uploads back.
+The shop ends as one deployment, in one transaction, with catalog, its sweeper and files at 0 replicas as the way back.
+
+| | |
+|---|---|
+| Orders acknowledged | 441 of 451, and 441 new orders in the database: nothing committed behind an error |
+| Uploads acknowledged, read straight back | 70 of 77, 70 of 70 read back |
+| **Lost or changed** | **0** |
+| Data check of `uploads` during the freeze | passed |
+| Per product, writes frozen | 50 of 50 match |
+| Merged schema against the monolith before the split | 11 of 11: every key and index is back |
+
+What a merge has to undo, found by reading before running:
+- **The split took rights away.** The monolith's role kept only `SELECT` on `products` and had lost `INSERT` on `uploads`. Switching
+  back without granting them would have failed every order and every upload, with health green.
+- **Pending reservations must settle first.** Catalog and its sweeper retire only once nothing is pending.
+- **Prove the monolith can read what the service stored.** The 5 newest uploads, written by the files service, were served by the
+  monolith with the right bytes before any traffic moved.
+
+What went wrong: **each rolling restart of the shop dropped orders.** 5 orders failed with a 502 in each of the two restarts (one
+for the order mode, one for the files link). The shop has no preStop drain, so a pod stops while traffic still reaches it. The 7
+refused uploads all fall inside the 7 s file freeze, as designed.
+
+Not tested: going back out to the services after the merge. The files database is read-only and replicating, and the
+deployments are at 0, but that path has not been run.
+
 ## What went wrong on the way
 
 | Trap | What happened |
