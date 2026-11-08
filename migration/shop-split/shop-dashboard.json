@@ -1,0 +1,18 @@
+{
+  "title": "Shop cutover",
+  "uid": "shop-cutover",
+  "schemaVersion": 39,
+  "time": {"from": "now-1h", "to": "now"},
+  "panels": [
+    {"type": "timeseries", "title": "Customer requests per second, by status", "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+     "targets": [{"refId": "A", "expr": "sum by (status) (rate(shop_http_requests_total{route!~\"/metrics|/health|/ready\"}[$__rate_interval]))"}]},
+    {"type": "timeseries", "title": "Share of customer requests failing", "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+     "targets": [{"refId": "A", "expr": "(sum(rate(shop_http_requests_total{status=~\"5..\", route!~\"/metrics|/health|/ready\"}[$__rate_interval])) or vector(0)) / sum(rate(shop_http_requests_total{route!~\"/metrics|/health|/ready\"}[$__rate_interval]))"}]},
+    {"type": "timeseries", "title": "Stock no order or reservation explains", "gridPos": {"x": 0, "y": 8, "w": 8, "h": 8},
+     "targets": [{"refId": "A", "expr": "max(shop_stock_unexplained_units)"}]},
+    {"type": "timeseries", "title": "Stock held by pending reservations", "gridPos": {"x": 8, "y": 8, "w": 8, "h": 8},
+     "targets": [{"refId": "A", "expr": "max(shop_reservations_pending_units)"}]},
+    {"type": "stat", "title": "Stock check running", "gridPos": {"x": 16, "y": 8, "w": 8, "h": 8},
+     "targets": [{"refId": "A", "expr": "min(shop_reconcile_up)"}]}
+  ]
+}

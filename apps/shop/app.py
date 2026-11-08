@@ -18,6 +18,7 @@ import boto3
 import psycopg
 from azure.storage.blob import BlobServiceClient
 from flask import Flask, Response, jsonify, request
+from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, CollectorRegistry, Counter, generate_latest, multiprocess
 from psycopg.types.json import Jsonb
 
 app = Flask(__name__)
@@ -87,6 +88,77 @@ def database_down(_):
 @app.errorhandler(psycopg.errors.InsufficientPrivilege)
 def writes_moved(_):
     return jsonify(error="this table has moved or is being moved"), 503
+
+
+# Metrics. Gunicorn runs two workers, so counters live in files both write (gunicorn.conf.py clears them on start).
+METRICS_DIR = os.environ.get("PROMETHEUS_MULTIPROC_DIR")
+if METRICS_DIR:
+    Path(METRICS_DIR).mkdir(parents=True, exist_ok=True)
+REQUESTS = Counter("shop_http_requests_total", "Requests answered, by route and status", ["route", "status"])
+
+
+@app.after_request
+def count(response):
+    REQUESTS.labels(request.url_rule.rule if request.url_rule else "unmatched", str(response.status_code)).inc()
+    return response
+
+
+def stock_balance():
+    """Per product, stock taken that no order and no pending reservation explains. 0 everywhere while the promise holds.
+
+    A health check cannot see this: the naive split lost 28 units with every order a success. Local mode reads one
+    database in one statement; split mode asks catalog first, so an order in flight shows for a moment and settles.
+    """
+    if CATALOG_URL:
+        status, catalog = service(f"{CATALOG_URL}/totals", attempts=1)
+        if status != 200 or "pendingTaken" not in catalog:
+            return None
+        with db() as conn, conn.cursor() as cur:
+            cur.execute("select product_id, sum(qty) from order_items group by product_id")
+            sold = {str(r[0]): int(r[1]) for r in cur.fetchall()}
+        pending = catalog["pendingTaken"]
+        return {p: int(t) - sold.get(p, 0) - int(pending.get(p, 0)) for p, t in catalog["taken"].items()}, sum(map(int, pending.values()))
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("select to_regclass('reservations') is not null")
+        pending = """select (l->>'product_id')::int product_id, sum((l->>'qty')::int) n
+                     from reservations r, jsonb_array_elements(coalesce(r.priced, '[]')) l where r.status = 'pending' group by 1"""
+        if not cur.fetchone()[0]:  # a monolith that never split has nothing pending
+            pending = "select null::int product_id, 0 n where false"
+        cur.execute(f"""
+            with sold as (select product_id, sum(qty) n from order_items group by 1), pending as ({pending})
+            select p.id, p.initial_stock - p.stock - coalesce(s.n, 0) - coalesce(q.n, 0), coalesce(q.n, 0)
+            from products p left join sold s on s.product_id = p.id left join pending q on q.product_id = p.id""")
+        rows = cur.fetchall()
+    return {str(r[0]): int(r[1]) for r in rows}, sum(int(r[2]) for r in rows)
+
+
+@app.get("/metrics")
+def metrics():
+    registry = REGISTRY
+    if METRICS_DIR:
+        registry = CollectorRegistry()
+        multiprocess.MultiProcessCollector(registry)
+    lines = [generate_latest(registry).decode()]
+    try:
+        balance = stock_balance()
+    except psycopg.Error:
+        balance = None
+    # Without this series the drift alert has nothing to fire on: say so, rather than stay silent.
+    lines.append("# HELP shop_reconcile_up 1 when the stock promise could be checked on this scrape\n# TYPE shop_reconcile_up gauge\n"
+                 f"shop_reconcile_up {0 if balance is None else 1}\n")
+    if balance is not None:
+        drift, pending = balance
+        # Summed as absolute values: one product up by 3 and another down by 3 is 6 units wrong, not none.
+        lines.append("# HELP shop_stock_unexplained_units Stock taken that no order or pending reservation explains, per product, summed\n"
+                     "# TYPE shop_stock_unexplained_units gauge\n"
+                     f"shop_stock_unexplained_units {sum(abs(v) for v in drift.values())}\n"
+                     "# HELP shop_products_drifting Products whose stock no order or pending reservation explains\n"
+                     "# TYPE shop_products_drifting gauge\n"
+                     f"shop_products_drifting {sum(1 for v in drift.values() if v)}\n"
+                     "# HELP shop_reservations_pending_units Stock held by reservations not yet settled\n"
+                     "# TYPE shop_reservations_pending_units gauge\n"
+                     f"shop_reservations_pending_units {pending}\n")
+    return Response("".join(lines), content_type=CONTENT_TYPE_LATEST)
 
 
 # Retries must fit inside the caller's patience. 3 tries of 2 s outlasted the edge's 5 s: the customer got an error

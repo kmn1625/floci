@@ -16,6 +16,7 @@ itsdangerous==2.2.0
 Jinja2==3.1.6
 jmespath==1.1.0
 MarkupSafe==3.0.4
+prometheus_client==0.26.0
 psycopg==3.3.8
 psycopg-binary==3.3.8
 pycparser==3.12

@@ -3,7 +3,8 @@
 #   bash gate-run.sh <run-name>
 # Catalog seam, with customers shopping: baseline, split check, attack drill, frozen per-item reconciliation, the move
 # and its rollback under load, the restored check, then the gate. Evidence lands in .cache/migrate-drill/gate-<run-name>.
-# monitoring.json and approval.json are never written here: nobody watched or approved a lab run, so the gate refuses.
+# monitoring.json comes from drills on the split shop (monitoring.sh must be up and forwarding). approval.json is never
+# written here: a person other than the operator approves the printed digest on GitHub, and migration-approval.py records it.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 RUN=${1:?usage: gate-run.sh <run-name>}
@@ -27,6 +28,16 @@ snapshot() { # db file
   docker exec "$RDS" psql -U shopadmin -d "$1" -At -f /tmp/snapshot.sql > "$2"
 }
 ev() { "$PYTHON" -X utf8 "$HERE_WIN/evidence.py" "$@"; }
+
+PROM=http://127.0.0.1:19090
+AM=http://127.0.0.1:19093
+curl -sf -m 5 "$PROM/-/ready" >/dev/null && curl -sf -m 5 "$AM/-/ready" >/dev/null \
+  || { echo "STOP: no monitoring on $PROM and $AM: bash monitoring.sh up, then keep bash monitoring.sh forward running" >&2; exit 1; }
+
+stamp "0. catalog and its sweeper running: after a merge back they sit at zero"
+k scale deploy/catalog --replicas=2 >/dev/null
+k scale deploy/catalog-sweeper --replicas=1 >/dev/null
+k rollout status deploy/catalog --timeout=240s | tail -1
 
 stamp "1. the key a split drops goes back first, if no order item points at a missing product"
 orphans=$(sql shop "select count(*) from order_items i left join products p on p.id = i.product_id where p.id is null")
@@ -117,7 +128,39 @@ snapshot shop "$EV/after.json"
 # The catalog seam owns no files: an honest zero, not a skipped check.
 echo '{"inDatabase": 0, "notInBucket": 0, "hashed": 0, "checksumMismatch": 0, "note": "the catalog seam moves no files"}' > "$EV/files-check.json"
 
-stamp "8. the gate, split mode"
+stamp "8. monitoring on the split shop: each alert made to fire, reach the pager and clear, one fault at a time"
+mon() { "$PYTHON" -X utf8 "$TOOLS/migration-monitoring-check.py" "$@"; }
+drill() { # alert inject restore
+  mon drill --prometheus "$PROM" --alertmanager "$AM" --alert "$1" --inject "$2" --restore "$3" --log "$EV_WIN/drills.jsonl" \
+    --timeout 300 | tee -a "$EV/drills.log" || true
+}
+psql_c() { echo "docker exec $RDS psql -U shopadmin -d $1 -Atc \"$2\""; }
+# Stock taken with no order behind it, as a lost write would leave it.
+drill ShopStockDrift "$(psql_c shop "update products set stock = stock - 2 where id = 7")" \
+  "$(psql_c shop "update products set stock = stock + 2 where id = 7")"
+# Customers' writes failing: the shop's role made read-only, with shoppers on the site.
+"$PYTHON" -X utf8 "$LOAD_PY" run --url "$URL" --seconds 600 --rate 5 --uploads 0.1 --out "$EV_WIN/drill-load.jsonl" \
+  --stop-file "$EV_WIN/drill-stop" > "$EV/drill-load.log" 2>&1 &
+DLOAD=$!
+sleep 60   # a minute of normal traffic first: the error rate needs something to compare with
+drill ShopErrorRate "$(psql_c postgres "alter role shop_app in database shop set default_transaction_read_only = on") && $(psql_c shop \
+  "select count(pg_terminate_backend(pid)) from pg_stat_activity where datname = 'shop' and usename = 'shop_app'")" \
+  "$(psql_c postgres "alter role shop_app in database shop reset default_transaction_read_only")"
+touch "$EV/drill-stop"
+wait $DLOAD || true
+# Nothing scraped at all: every other alert would stay silent.
+drill ShopTargetMissing "docker exec $EKS kubectl -n shop scale deploy/shop --replicas=0" \
+  "docker exec $EKS kubectl -n shop scale deploy/shop --replicas=2"
+k rollout status deploy/shop --timeout=240s | tail -1
+sleep 30
+mon check --prometheus "$PROM" --alertmanager "$AM" --alert ShopErrorRate --alert ShopTargetMissing --reconcile-alert ShopStockDrift \
+  --dashboard "$HERE_WIN/shop-dashboard.json" --minutes 60 --drills "$EV_WIN/drills.jsonl" --out "$EV_WIN/monitoring.json" || true
+
+stamp "9. the gate, split mode"
 rc=0; "$PYTHON" -X utf8 "$TOOLS/migration-cutover-gate.py" --evidence "$EV_WIN" --split --out "$EV_WIN/decision.json" || rc=$?
 echo "gate exit $rc"
+digest=$("$PYTHON" -X utf8 "$TOOLS/migration-cutover-gate.py" --evidence "$EV_WIN" --digest)
+echo "$digest" > "$EV/evidence-digest.txt"
+echo "To approve, someone other than the operator comments, on a line of its own:  approve cutover $digest"
+echo "then: python tools/migration-approval.py --evidence $EV_WIN --operator <who ran this> --url <link to the comment>"
 verify

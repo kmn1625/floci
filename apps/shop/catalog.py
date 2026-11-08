@@ -163,7 +163,12 @@ def totals():
         stock, initial, pending = cur.fetchone()
         cur.execute("select id, initial_stock - stock from products")
         taken = {str(r[0]): r[1] for r in cur.fetchall()}
-    return jsonify(stock=int(stock), initial=int(initial), pending=pending, taken=taken)
+        # What pending reservations hold, per product: taken but not yet an order or released. The shop's drift metric
+        # subtracts it, or every order in flight would read as drift.
+        cur.execute("""select l->>'product_id', sum((l->>'qty')::int) from reservations r, jsonb_array_elements(coalesce(r.priced, '[]')) l
+                       where r.status = 'pending' group by 1""")
+        pending_taken = {r[0]: int(r[1]) for r in cur.fetchall()}
+    return jsonify(stock=int(stock), initial=int(initial), pending=pending, taken=taken, pendingTaken=pending_taken)
 
 
 if __name__ == "__main__":

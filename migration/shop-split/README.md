@@ -85,6 +85,39 @@ Each run moves catalog into a database of its own (`CATALOG_DB=catalog_<run>`): 
 has tables, and the last run's copy is stale. The move now proves `catalog-next` can do its job on its own database first:
 it reads products and holds the grants it needs, without writing to the target before cutover.
 
+## Watched and approved: run r4 (8 Nov)
+
+Monitoring and approval were the two checks no lab run had passed, because the gate took a file saying `true`. Now
+`monitoring.sh up` puts Prometheus, Alertmanager and a webhook pager on the shop's cluster, and shop 1.3.0 exports its
+own stock check on `/metrics`: per product, stock that no order and no pending reservation explains. `gate-run.sh` drills
+each alert on the split shop, one fault at a time, and `migration-monitoring-check.py` writes `monitoring.json` from what
+it saw. Run r4 started from the merged monolith, so it is also the first split after a merge back.
+
+| Alert | Fault | Fired after | Pager took it | Cleared after the fault was undone |
+|---|---|---|---|---|
+| ShopStockDrift | 2 units of stock taken with no order | 93 s | 94 s | 31 s |
+| ShopErrorRate | the shop's role made read-only, customers shopping | 84 s | 85 s | 78 s |
+| ShopTargetMissing | shop scaled to 0 | 99 s | 99 s | 47 s |
+
+All five dashboard queries returned data. The rest of r4: attack 173 of 173 orders, 16 answers lost after commit, 5 pods
+killed, none errored but committed; 50 of 50 products reconcile while frozen; move and back 249 acknowledged, 0 lost;
+restored check 11 of 11.
+
+The gate then refused two things, both correctly:
+- **split**: the split check found the new stock metric's query, which reads products, reservations and order_items in one
+  statement. Split, it asks catalog instead, and that decision is now in `split-decisions.json`. The run's own split
+  check is kept as `split-check.run.json` next to the re-resolved one.
+- **approval**: none yet. The run prints the digest of its evidence. Someone other than the operator comments
+  `approve cutover sha256:...` on GitHub and `migration-approval.py` records it. A digest from before the split check was
+  re-resolved no longer matches.
+
+What the monitoring work found first:
+- The stock alert was blind on its first scrape: after the merge, `shop_app` could not read `reservations`, so the check
+  could not run. The rule stayed healthy; only `ShopReconcileBlind` noticed. `monitoring.sh` now grants SELECT.
+- With the pager's address wrong, the first version of the drill passed. Alertmanager counts the attempt at once, and the
+  failure only 25 s later when the retries give up. The drill now counts accepted requests: 9 failed, none accepted, FAIL.
+- One product 3 units down and another 3 up: `/verify` said `stock_balanced: true`. The metric said 6 units, 2 products.
+
 ## And back: the services into the monolith (8 Nov)
 
 `merge-run.sh <name>` runs `merge.sh catalog` then `merge.sh files` with customers shopping and reading their uploads back.
@@ -134,17 +167,19 @@ a real replica this can happen, and the edge keeps a fallback to the old service
 - Several services' worth of size. One database cluster holds all three databases, on one laptop.
 - Contract: the old `uploads` table and the monolith's unused code are still there. Removing the old path is its own risky
   step and has not been rehearsed. (The key to `products` the 7 Nov rollback left dropped is restored now: see above.)
-- Going forward again after the catalog rollback.
+- Going forward again after the catalog rollback, to a live cutover. Run r4 split again after the merge back, as a rehearsal.
 - Customers retrying. `load.py` never retries an order, so a customer who resubmits after a timeout can still order twice.
 - An order can still commit while the customer gets an error, if a pod dies at that moment. This drill did not measure how
   often. Only an idempotency key from the client would close that.
 - An ORM. The seam check finds SQL by shape and refuses a codebase where it finds none.
-- Monitoring. `/verify` is a check the drill runs, not an alert. Real use needs drift as a metric.
-- The cutover gate was not run on this drill. Its evidence is written for a whole-system move.
+- A real pager, and someone woken by it. The pager is a webhook that logs. The drills prove an alert leaves Alertmanager
+  and is accepted, not that a person answers.
+- Approval by a second person in this lab: there is one. The gate stays refused until someone other than the operator
+  approves.
 
 ## Run it
 
-Needs the AWS lab running and shop 1.2.1 built from `apps/shop`.
+Needs the AWS lab running and shop 1.3.0 built from `apps/shop`.
 
 ```bash
 bash edge.sh start
@@ -159,3 +194,12 @@ python ../onprem-to-aws/load.py check --url http://127.0.0.1:18080 --log run.jso
 ```
 
 `experiment.sh` repairs stock before it starts and refuses to run while a load generator is alive.
+
+The gate run, with monitoring (Prometheus on 127.0.0.1:19090 and Alertmanager on :19093 while `forward` runs):
+
+```bash
+bash monitoring.sh up
+bash monitoring.sh forward &
+bash gate-run.sh r5            # evidence in .cache/migrate-drill/gate-r5; prints the digest to approve
+python ../../../devops-project/tools/migration-approval.py --evidence <that folder> --operator <who ran it> --url <comment link>
+```

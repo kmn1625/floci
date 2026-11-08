@@ -8,7 +8,7 @@ PYTHON=D:/devops-project/.venv-py314/Scripts/python.exe
 LOAD_PY=D:/devops-project/floci/migration/onprem-to-aws/load.py   # Windows path: this file exports MSYS_NO_PATHCONV
 RDS=$(cat "$DRILL/rds.name")
 EKS=floci-aws-eks-shop
-TAG=1.2.1
+TAG=1.3.0
 DB_HOST=10.50.0.2:7002     # how pods reach RDS through Floci
 URL=http://127.0.0.1:18080
 

@@ -1,5 +1,6 @@
 {
   "shared transaction: app.py: def create_order():": "ORDER_MODE=saga: the shop reserves stock with a key it chooses, commits the order, then confirms. A retry with the key changes nothing. The sweeper settles what a crash leaves pending by asking the owner of orders (catalog.py /sweep).",
   "shared statement: app.py: def verify():": "verify_split asks each owner for its own totals (/totals) and reports catalog unavailable when one owner is slow, instead of one query that could not partly fail.",
-  "foreign key: order_items -> products": "Dropped before the data moves: no database can enforce it across two. Per-item reconciliation (migration-reconcile) with an alert replaces it, and the rollback has to put it back."
+  "foreign key: order_items -> products": "Dropped before the data moves: no database can enforce it across two. Per-item reconciliation (migration-reconcile) with an alert replaces it, and the rollback has to put it back.",
+  "shared statement: app.py: def stock_balance():": "The stock metric (8 Nov). Split, it asks catalog for what it took and holds pending (/totals, pendingTaken) and reads only the shop's own order_items: the one statement runs only in the monolith. It exports drift per item; ShopStockDrift and ShopReconcileBlind alert on it, drilled before the gate."
 }

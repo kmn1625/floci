@@ -1,0 +1,294 @@
+# What the cutover gate's monitoring check reads: Prometheus with the shop's alerts, Alertmanager, and a webhook sink
+# standing in for the pager. monitoring.sh applies it. Lab sizing: no volumes, 2 days of data.
+#
+# The alerts are the ones a cutover needs, short `for` so a drill takes minutes:
+#   ShopErrorRate      more than 5% of customer requests fail. Probes are left out: they would dilute the rate.
+#   ShopStockDrift     stock that no order and no pending reservation explains (shop /metrics). The naive split lost
+#                      28 units with every order a success: no error alert would ever fire on that.
+#   ShopReconcileBlind the drift series is missing or cannot be computed: the drift alert would stay silent.
+#   ShopTargetMissing  no shop pod is being scraped: every other alert would stay silent.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: prometheus-discovery
+  namespace: shop
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: prometheus-discovery
+  namespace: shop
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: prometheus-discovery
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: monitoring
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+    rule_files: [/etc/prometheus/rules.yml]
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: ["alertmanager.monitoring:9093"]
+    scrape_configs:
+      - job_name: shop
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: {names: [shop]}
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app, __meta_kubernetes_pod_container_port_number]
+            regex: shop;8000
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+      - job_name: alertmanager   # its notification counters prove a page left, not just that an alert fired
+        static_configs:
+          - targets: ["alertmanager.monitoring:9093"]
+      - job_name: prometheus
+        static_configs:
+          - targets: ["localhost:9090"]
+  rules.yml: |
+    groups:
+      - name: shop-cutover
+        rules:
+          - alert: ShopErrorRate
+            expr: |
+              sum(rate(shop_http_requests_total{status=~"5..", route!~"/metrics|/health|/ready"}[1m]))
+                / sum(rate(shop_http_requests_total{route!~"/metrics|/health|/ready"}[1m])) > 0.05
+            for: 1m
+            labels: {severity: page}
+            annotations: {summary: "More than 5% of shop requests fail"}
+          - alert: ShopStockDrift
+            expr: max(shop_stock_unexplained_units) > 0
+            for: 1m
+            labels: {severity: page}
+            annotations: {summary: "{{ $value }} units of stock that no order or pending reservation explains"}
+          - alert: ShopReconcileBlind
+            expr: max(shop_reconcile_up) < 1 or absent(shop_reconcile_up)
+            for: 2m
+            labels: {severity: page}
+            annotations: {summary: "The stock check cannot run: ShopStockDrift is blind"}
+          - alert: ShopTargetMissing
+            expr: absent(up{job="shop"} == 1)
+            for: 1m
+            labels: {severity: page}
+            annotations: {summary: "No shop pod is scraped: every shop alert is blind"}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: prometheus}
+  template:
+    metadata:
+      labels: {app: prometheus}
+      annotations:
+        config-hash: "__CONFIG_HASH__"   # monitoring.sh fills it: a changed rule restarts the pod
+    spec:
+      serviceAccountName: prometheus
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.15.1
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=2d
+          ports:
+            - containerPort: 9090
+          readinessProbe:
+            httpGet: {path: /-/ready, port: 9090}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 384Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: config, mountPath: /etc/prometheus}
+            - {name: data, mountPath: /prometheus}
+      volumes:
+        - name: config
+          configMap: {name: prometheus}
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  selector: {app: prometheus}
+  ports:
+    - port: 9090
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager
+  namespace: monitoring
+data:
+  alertmanager.yml: |
+    route:
+      receiver: oncall
+      group_by: [alertname]
+      group_wait: 10s
+      group_interval: 30s
+      repeat_interval: 4h
+    receivers:
+      - name: oncall
+        webhook_configs:
+          - url: __ONCALL_URL__
+            send_resolved: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: alertmanager}
+  template:
+    metadata:
+      labels: {app: alertmanager}
+      annotations:
+        config-hash: "__CONFIG_HASH__"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: alertmanager
+          image: prom/alertmanager:v0.34.2
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+          ports:
+            - containerPort: 9093
+          readinessProbe:
+            httpGet: {path: /-/ready, port: 9093}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 96Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: config, mountPath: /etc/alertmanager}
+            - {name: data, mountPath: /alertmanager}
+      volumes:
+        - name: config
+          configMap: {name: alertmanager}
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  namespace: monitoring
+spec:
+  selector: {app: alertmanager}
+  ports:
+    - port: 9093
+---
+# The pager: logs every notification it receives, one JSON line each. The shop image already has Python.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alert-sink
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: alert-sink}
+  template:
+    metadata:
+      labels: {app: alert-sink}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: sink
+          image: shop:__TAG__
+          imagePullPolicy: Never
+          command:
+            - python
+            - -c
+            - |
+              import http.server, json
+              class Pager(http.server.BaseHTTPRequestHandler):
+                  def do_POST(self):
+                      note = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+                      for a in note.get("alerts", []):
+                          print(json.dumps({"alert": a["labels"].get("alertname"), "status": a["status"], "startsAt": a["startsAt"]}), flush=True)
+                      self.send_response(200)
+                      self.end_headers()
+                  def log_message(self, *args):
+                      pass
+              http.server.ThreadingHTTPServer(("", 8080), Pager).serve_forever()
+          ports:
+            - containerPort: 8080
+          resources:
+            requests: {cpu: 5m, memory: 16Mi}
+            limits: {memory: 48Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alert-sink
+  namespace: monitoring
+spec:
+  selector: {app: alert-sink}
+  ports:
+    - port: 8080
