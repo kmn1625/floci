@@ -4,9 +4,9 @@
 # kubectl is built from source: the 1.36 and 1.37 release binaries ship x/net with a critical CVE
 # (GO-2026-6612). kubectl/ is upstream's main.go with go.sum pinning every module. Drop this stage
 # once a release ships x/net >= 0.60.0.
-FROM golang:1.26.10@sha256:b27fde63cc160f04a81cf7cf43c6560b47d736a1f0e3babe17745e8fbdff198d AS kubectl
-ARG KUBECTL_VERSION=1.36.6
-ARG KUBECTL_COMMIT=1b2171b110bb2a2542e1322035c6583ec86eb976
+FROM golang:1.27.2@sha256:820153096fda4de6ac1b7194d12e416b7dd8f4e9a33d17e0345b111b945162d8 AS kubectl
+ARG KUBECTL_VERSION=1.37.2
+ARG KUBECTL_COMMIT=c50e5395f1ae2d4a2c05f28fdcc38c0916cc1a32
 ENV CGO_ENABLED=0 GOFLAGS="-trimpath"
 WORKDIR /src
 COPY kubectl/ ./
@@ -18,7 +18,8 @@ RUN v="v${KUBECTL_VERSION}" major="${KUBECTL_VERSION%%.*}" minor="${KUBECTL_VERS
        done \
     && go build -mod=readonly -ldflags "$ld" -o /out/kubectl .
 
-FROM python:3.12.16-slim@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30
+# 3.14, as the devops engine: Dependabot offered 3.15.0, which carries a critical CVE fixed in 3.15.2.
+FROM python:3.14.10-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
