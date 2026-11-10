@@ -4,8 +4,14 @@ kind: Deployment
 metadata:
   name: __NAME__
   namespace: shop
+  annotations:
+    # Lab images are built here and loaded into k3s with `ctr import`: no registry to pull from or name a digest in.
+    checkov.io/skip1: CKV_K8S_43=lab image imported into the node, no registry digest
+    checkov.io/skip2: CKV_K8S_15=imagePullPolicy Never on purpose, the node holds the only copy
+    checkov.io/skip3: CKV_K8S_35=the services read DATABASE_URL from their environment; lab password
 spec:
   replicas: __REPLICAS__
+  minReadySeconds: 40   # longer than the liveness window: a Ready-then-dying version stops the rollout (§K020)
   selector:
     matchLabels:
       deploy: __NAME__

@@ -31,6 +31,10 @@ kind: Deployment
 metadata:
   name: catalog-sweeper
   namespace: shop
+  annotations:
+    # Lab images are built here and loaded into k3s with `ctr import`: no registry to pull from or name a digest in.
+    checkov.io/skip1: CKV_K8S_43=lab image imported into the node, no registry digest
+    checkov.io/skip2: CKV_K8S_15=imagePullPolicy Never on purpose, the node holds the only copy
 spec:
   replicas: 1
   selector:

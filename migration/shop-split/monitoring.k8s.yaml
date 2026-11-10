@@ -11,6 +11,8 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: monitoring
+  labels:
+    pod-security.kubernetes.io/enforce: restricted   # every pod here already runs as restricted asks (§K013)
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -133,9 +135,11 @@ spec:
             - containerPort: 9090
           readinessProbe:
             httpGet: {path: /-/ready, port: 9090}
+          lifecycle:
+            preStop: {sleep: {seconds: 5}}   # behind a Service: stop routing first (§K019)
           resources:
             requests: {cpu: 50m, memory: 128Mi}
-            limits: {memory: 384Mi}
+            limits: {cpu: 500m, memory: 384Mi}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -209,9 +213,11 @@ spec:
             - containerPort: 9093
           readinessProbe:
             httpGet: {path: /-/ready, port: 9093}
+          lifecycle:
+            preStop: {sleep: {seconds: 5}}   # behind a Service: stop routing first (§K019)
           resources:
             requests: {cpu: 10m, memory: 32Mi}
-            limits: {memory: 96Mi}
+            limits: {cpu: 100m, memory: 96Mi}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -270,14 +276,21 @@ spec:
                           print(json.dumps({"alert": a["labels"].get("alertname"), "status": a["status"], "startsAt": a["startsAt"]}), flush=True)
                       self.send_response(200)
                       self.end_headers()
+                  def do_GET(self):   # readiness
+                      self.send_response(200)
+                      self.end_headers()
                   def log_message(self, *args):
                       pass
               http.server.ThreadingHTTPServer(("", 8080), Pager).serve_forever()
           ports:
             - containerPort: 8080
+          readinessProbe:
+            httpGet: {path: /, port: 8080}
+          lifecycle:
+            preStop: {sleep: {seconds: 5}}   # behind a Service: stop routing first (§K019)
           resources:
             requests: {cpu: 5m, memory: 16Mi}
-            limits: {memory: 48Mi}
+            limits: {cpu: 50m, memory: 48Mi}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -292,3 +305,86 @@ spec:
   selector: {app: alert-sink}
   ports:
     - port: 8080
+---
+# NetworkPolicies for the monitoring namespace (§K015). Everything is denied, then:
+#   Prometheus    out: the shop's pods on 8000, Alertmanager on 9093, the Kubernetes API (pod discovery), DNS.
+#   Alertmanager  in: Prometheus on 9093.  out: the pager (alert-sink on 8080, or a real one over HTTPS), DNS.
+#   alert-sink    in: Alertmanager on 8080. out: nothing.
+# monitoring.sh forward and the gate's monitoring check go through kubectl port-forward, which enters the pod's own
+# network namespace: no policy applies to it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  podSelector: {matchLabels: {app: prometheus}}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+          podSelector: {matchLabels: {k8s-app: kube-dns}}
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: shop}}
+      ports:
+        - {port: 8000, protocol: TCP}
+    - to:
+        - podSelector: {matchLabels: {app: alertmanager}}
+      ports:
+        - {port: 9093, protocol: TCP}
+    - ports:   # the API server: the kubernetes Service on 443, the node's 6443 once it is resolved
+        - {port: 443, protocol: TCP}
+        - {port: 6443, protocol: TCP}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: alertmanager
+  namespace: monitoring
+spec:
+  podSelector: {matchLabels: {app: alertmanager}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: prometheus}}
+      ports:
+        - {port: 9093, protocol: TCP}
+  egress:
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+          podSelector: {matchLabels: {k8s-app: kube-dns}}
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - to:
+        - podSelector: {matchLabels: {app: alert-sink}}
+      ports:
+        - {port: 8080, protocol: TCP}
+    - ports:   # a real pager, when monitoring.sh up is given ONCALL_URL
+        - {port: 443, protocol: TCP}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: alert-sink
+  namespace: monitoring
+spec:
+  podSelector: {matchLabels: {app: alert-sink}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: alertmanager}}
+      ports:
+        - {port: 8080, protocol: TCP}
