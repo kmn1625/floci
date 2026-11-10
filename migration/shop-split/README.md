@@ -174,8 +174,14 @@ not a timeout: compare with a pod in a namespace without policies before calling
 (`monitoring.sh forward`, the gate's monitoring check) enters the pod's own network namespace, so no policy applies to it.
 
 The database ports are a range, 7000-7099: Floci gives each RDS instance its own port, and the split has three databases
-on one server today. Not tested with policies on: a full gate run, the split itself (catalog and files with their own
-databases under load), and the AKS manifest, which has the same changes but was not run.
+on one server today.
+
+The AKS manifest (`../aws-to-azure/shop.aks.yaml`) has the same changes with Azure's ports. On the AKS lab, probed from
+a shop pod: Postgres 5432 and Blob 4577 stayed open, the Kubernetes API and the ACR registry went from open to refused.
+Getting there needed azure F-38 (a Node registered on the wrong address after `docker start floci-az`).
+
+Not tested with policies on: a full gate run, the split itself (catalog and files with their own databases under load),
+and the AWS to Azure drill end to end: its Azure database server no longer exists, so the AKS shop is not Ready.
 
 ## What went wrong on the way
 

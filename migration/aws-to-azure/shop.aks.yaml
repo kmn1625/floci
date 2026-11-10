@@ -120,7 +120,8 @@ spec:
 # NetworkPolicies for the shop namespace (§K015), as on the EKS lab (migration/shop-split/README.md) with Azure's ports:
 #   in:  8000 (the edge through the NodePort).
 #   out: DNS; Azure Database for PostgreSQL on 5432 and Floci's Blob endpoint on 4577, outside the cluster.
-# Written 10 Nov with the EKS policies, which were proved on that lab; this one has not been run.
+# Probed on the AKS lab 10 Nov from a shop pod: 5432 and 4577 open, the Kubernetes API and the registry refused (all
+# open before). The full drill was not run with it: its Azure database server no longer exists.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
