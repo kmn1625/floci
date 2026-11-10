@@ -20,8 +20,16 @@ kind: Deployment
 metadata:
   name: shop
   namespace: shop
+  annotations:
+    # Lab images are built here and loaded into k3s with `ctr import`: there is no registry to pull from or name a digest in.
+    checkov.io/skip1: CKV_K8S_43=lab image imported into the node, no registry digest
+    checkov.io/skip2: CKV_K8S_15=imagePullPolicy Never on purpose, the node holds the only copy
+    checkov.io/skip3: CKV_K8S_35=the shop reads DATABASE_URL from its environment; lab password
 spec:
   replicas: __REPLICAS__
+  # Longer than the liveness window (30 s): a version that turns Ready and then fails liveness stops the rollout
+  # instead of replacing every old pod (§K020).
+  minReadySeconds: 40
   selector:
     matchLabels:
       app: shop
@@ -113,3 +121,44 @@ spec:
     - port: 80
       targetPort: 8000
       nodePort: 30080
+---
+# NetworkPolicies for the shop namespace (§K015): k3s enforces them. Everything is denied, then this opens what
+# the shop and the services split out of it use. Ports, not addresses: Postgres and S3 run in Floci, outside the
+# cluster, at an address the scripts fill in.
+#   in:  8000 on every pod: the edge through the NodePorts, the services calling each other, Prometheus scraping.
+#   out: DNS; 8000 to pods in this namespace (shop <-> catalog, files -> shop, sweeper -> catalog);
+#        Floci: 4566 (S3) and 7000-7099 (RDS, one port per database instance).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: shop
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: shop-traffic
+  namespace: shop
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports:
+        - {port: 8000, protocol: TCP}
+  egress:
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+          podSelector: {matchLabels: {k8s-app: kube-dns}}
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - to:
+        - podSelector: {}
+      ports:
+        - {port: 8000, protocol: TCP}
+    - ports:
+        - {port: 4566, protocol: TCP}
+        - {port: 7000, endPort: 7099, protocol: TCP}

@@ -43,6 +43,7 @@ was verified, and what the lab does about it. Re-test the gated ones with
 | F-35 | PostgreSQL | `azurerm_postgresql_flexible_server_configuration` `wal_level = logical` succeeds, and the server stays on `replica`. Found by the AWS to Azure drill. | `ALTER SYSTEM` and a container restart. Check settings on the server, not in the control plane. |
 | F-36 | Storage | The storage key is not checked: a corrupted key listed the container. Authentication and permissions prove nothing here. | None. Say so in any report. |
 | F-37 | Storage | Blob data plane works with the real SDK on a path-style URL (`http://floci-az:4577/<account>`). `content_md5` is empty and the ETag is an opaque id. | Hash the bytes. |
+| F-38 | Restarts | `docker start floci-az` starts its children itself, in any order. On 10 Nov the AKS container came up first on another address (`.3`) and registered its Node with it; back on its own (`.6`), k3s's network policy controller exited: `failed to find interface with specified node ip`. Postgres and the registry also swapped addresses, so the shop's `DATABASE_URL` pointed at the registry. | `recover-after-restart.sh` step 3 corrects the Node's address in the ~3 s the API answers before the exit; it prints every child's address. A child on another address still needs moving back by hand (`docker network disconnect` / `connect --ip`). |
 
 ## Coverage (Terraform, azurerm 4.81.0, floci-az 0.15.0)
 

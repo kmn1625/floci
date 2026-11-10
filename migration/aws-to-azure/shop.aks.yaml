@@ -21,8 +21,14 @@ kind: Deployment
 metadata:
   name: shop
   namespace: shop
+  annotations:
+    # Lab images are built here and loaded into the node: there is no registry to pull from or name a digest in.
+    checkov.io/skip1: CKV_K8S_43=lab image imported into the node, no registry digest
+    checkov.io/skip2: CKV_K8S_15=imagePullPolicy Never on purpose, the node holds the only copy
+    checkov.io/skip3: CKV_K8S_35=the shop reads DATABASE_URL and BLOB_KEY from its environment; lab secrets
 spec:
   replicas: 2
+  minReadySeconds: 40   # longer than the liveness window: a Ready-then-dying version stops the rollout (§K020)
   selector:
     matchLabels:
       app: shop
@@ -110,3 +116,39 @@ spec:
     - port: 80
       targetPort: 8000
       nodePort: 30080
+---
+# NetworkPolicies for the shop namespace (§K015), as on the EKS lab (migration/shop-split/README.md) with Azure's ports:
+#   in:  8000 (the edge through the NodePort).
+#   out: DNS; Azure Database for PostgreSQL on 5432 and Floci's Blob endpoint on 4577, outside the cluster.
+# Probed on the AKS lab 10 Nov from a shop pod: 5432 and 4577 open, the Kubernetes API and the registry refused (all
+# open before). The full drill was not run with it: its Azure database server no longer exists.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: shop
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: shop-traffic
+  namespace: shop
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports:
+        - {port: 8000, protocol: TCP}
+  egress:
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+          podSelector: {matchLabels: {k8s-app: kube-dns}}
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - ports:
+        - {port: 5432, protocol: TCP}
+        - {port: 4577, protocol: TCP}

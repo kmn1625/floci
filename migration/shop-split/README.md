@@ -148,6 +148,41 @@ refused uploads all fall inside the 7 s file freeze, as designed. `split.sh cata
 Not tested: going back out to the services after the merge. The files database is read-only and replicating, and the
 deployments are at 0, but that path has not been run.
 
+## Locked down: network policies (10 Nov)
+
+The drill manifests failed the devops engine's own `validate-k8s`: no NetworkPolicy anywhere (§K015), no
+`minReadySeconds` (§K020), a Namespace with no Pod Security label (§K013), Services in front of pods with no preStop
+(§K019) or no readiness probe, no CPU limits on the monitoring pods. `bash ../validate.sh` renders the templates with
+sample values and checks each drill's set together; the EKS set now passes every check. checkov's image digest, pull
+policy and secret-in-environment checks are skipped by annotation, each with its reason: lab images are loaded into the
+node with `ctr import`, there is no registry.
+
+k3s enforces NetworkPolicies, so they were proved on the running lab, not just written:
+
+| Path | Result |
+|---|---|
+| Load through the edge, with the policies on | 217 of 217 orders and 16 of 16 uploads, as before them (110 and 10 in 30 s) |
+| shop pod to RDS through Floci (`10.50.0.2:7002`) and S3 (`:4566`) | open |
+| shop to catalog and catalog to shop, port 8000 | open, both ways |
+| shop or catalog to the Kubernetes API (`10.100.0.1:443`) | refused. From a namespace with no policy: open |
+| shop to Prometheus, Alertmanager, the pager | refused |
+| Prometheus to the shop's pods, to Alertmanager, to the API (pod discovery) | every target up, Alertmanager connected |
+| ShopTargetMissing drill: scale to 0, fire, Alertmanager, pager, clear | PASS: firing in 104 s, cleared 41 s after the restore |
+
+Two things to know. kube-router answers a refused connection with a reset, so a blocked port reads `ConnectionRefused`,
+not a timeout: compare with a pod in a namespace without policies before calling it blocked. And `kubectl port-forward`
+(`monitoring.sh forward`, the gate's monitoring check) enters the pod's own network namespace, so no policy applies to it.
+
+The database ports are a range, 7000-7099: Floci gives each RDS instance its own port, and the split has three databases
+on one server today.
+
+The AKS manifest (`../aws-to-azure/shop.aks.yaml`) has the same changes with Azure's ports. On the AKS lab, probed from
+a shop pod: Postgres 5432 and Blob 4577 stayed open, the Kubernetes API and the ACR registry went from open to refused.
+Getting there needed azure F-38 (a Node registered on the wrong address after `docker start floci-az`).
+
+Not tested with policies on: a full gate run, the split itself (catalog and files with their own databases under load),
+and the AWS to Azure drill end to end: its Azure database server no longer exists, so the AKS shop is not Ready.
+
 ## What went wrong on the way
 
 | Trap | What happened |
