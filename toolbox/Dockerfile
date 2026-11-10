@@ -4,7 +4,7 @@
 # kubectl is built from source: the 1.36 and 1.37 release binaries ship x/net with a critical CVE
 # (GO-2026-6612). kubectl/ is upstream's main.go with go.sum pinning every module. Drop this stage
 # once a release ships x/net >= 0.60.0.
-FROM golang:1.27.2@sha256:820153096fda4de6ac1b7194d12e416b7dd8f4e9a33d17e0345b111b945162d8 AS kubectl
+FROM golang:1.27.3@sha256:e519d3b0a5b285e5aa53ab9eef02bc6bbb9cb04608389b743a136a9ce75f0d1e AS kubectl
 ARG KUBECTL_VERSION=1.37.2
 ARG KUBECTL_COMMIT=c50e5395f1ae2d4a2c05f28fdcc38c0916cc1a32
 ENV CGO_ENABLED=0 GOFLAGS="-trimpath"
