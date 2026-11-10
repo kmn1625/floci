@@ -26,6 +26,7 @@ fill() {  # sample values: what matters is that the result is valid Kubernetes
 eks() {
   local d="$OUT/eks"; mkdir -p "$d"
   fill "$HERE/onprem-to-aws/shop.k8s.yaml" > "$d/shop.yaml"
+  cp "$HERE/onprem-to-aws/audit-purge.k8s.yaml" "$d/audit-purge.yaml"
   fill "$HERE/shop-split/split.k8s.yaml" > "$d/split.yaml"
   fill "$HERE/shop-split/monitoring.k8s.yaml" > "$d/monitoring.yaml"
   for svc in catalog files; do   # as setup.sh renders them

@@ -1,0 +1,62 @@
+# The nightly purge from onprem1's /etc/cron.d/shop-nightly, moved to EKS by the decommission drill (10 Nov). The daily
+# report in the same file was retired, not moved: it appended to a file on the old server's disk that nobody read.
+# It reaches RDS through the shop namespace's egress policy (7000-7099), with the shop's own role and image.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: audit-purge
+  namespace: shop
+  annotations:
+    checkov.io/skip1: CKV_K8S_43=lab image imported into the node, no registry digest
+    checkov.io/skip2: CKV_K8S_15=imagePullPolicy Never on purpose, the node holds the only copy
+    checkov.io/skip3: CKV_K8S_35=reads DATABASE_URL from its environment, as the shop does; lab password
+spec:
+  schedule: "30 2 * * *"
+  timeZone: Etc/UTC          # the old cron ran in the VM's time zone, which is UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            app: audit-purge
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: purge
+              image: shop:1.3.0
+              imagePullPolicy: Never
+              command:
+                - python
+                - -c
+                - |
+                  import os, psycopg
+                  with psycopg.connect(os.environ["DATABASE_URL"], connect_timeout=10) as conn:
+                      n = conn.execute("delete from audit_log where at < now() - interval '30 days'").rowcount
+                  print(f"purged {n} audit_log rows older than 30 days")
+              envFrom:
+                - secretRef:
+                    name: shop-db
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 500m
+                  memory: 128Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]

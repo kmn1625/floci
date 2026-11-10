@@ -45,12 +45,42 @@ Each of these happened, and each is now a rule (`rules/migration.md` in devops-p
 | Orphan files | The app writes the file first, so uploads that failed in a freeze left strays: 786 files for 610 rows |
 | Read-only root filesystem | gunicorn's control socket default crashed the pods, and no startup probe made it worse |
 
+## Decommission (10 Nov)
+
+Four days later the shop ran on AWS and `onprem1` was still up: its app, nginx, PostgreSQL and the nightly cron job.
+The question: may it be switched off? The devops engine's `migration-decommission` job decides from evidence (rules
+§M040-§M046 in devops-project). The edge moved to AWS at 12:52 UTC, light load ran there for 40 minutes, and a job
+that reads `orders` every minute was planted on `onprem1` after the inventory, standing in for one added after the
+assessment.
+
+| Run | Result | What it found |
+|---|---|---|
+| R1, 14 min soak | Refused, 7 of 9 | 14 reads of `orders`; the stage-1 rollback subscription `back_sub` still enabled, pointing at a publication RDS no longer had; the nightly job and its reports with no decision; no backup; keep period open |
+| R2, 13 min | Refused, 2 of 7 | 1 read of `orders`: the operator counting orders. And no backup check, a script bug |
+| R3, 13 min | **May switch off**, 0 of 8 | PostgreSQL restarted twice mid-soak (unattended upgrades) and no counter went down, so a warning |
+
+What it taught:
+
+- **The planted job never showed as a session.** Each run lasted under a second. The table counters caught all 14.
+- **The cron hint named the wrong job.** The inventory had only `shop-nightly`, which also names `orders` and had not run. The real job came after the inventory. A table read in the soak is a lead to follow, not an answer.
+- **Its report was wrong all along.** Every run wrote 9,743 orders, frozen at the cutover, while RDS held 16,959.
+- **The operator's own queries count.** Count on the backup, or before the first sample.
+- **The old server changes on its own.** Booted after days off, it upgraded packages and restarted cron, nginx and PostgreSQL inside the soak.
+- **`systemctl stop postgresql` stopped nothing.** On Ubuntu it is an umbrella unit, and `postgresql@16-main` kept serving on 5432. `ss -ltn` showed it.
+
+Moved: the purge in `shop-nightly` now runs as the EKS CronJob in `audit-purge.k8s.yaml`, against RDS, run once from
+EKS. The daily report was retired. The final backup (`pg_dump`, 339 KB) was restored into a scratch database and
+compared with `migration-data-check --frozen`: 10 of 10. It is kept outside the VM in `.cache/migrate-drill/decom`.
+Then the shop, nginx, cron and PostgreSQL were stopped on `onprem1`, and AWS kept serving, including a new order.
+The VM was stopped, not deleted.
+
 ## Not tested
 
 - A real cloud. Nothing here measures real replication speed, RDS limits or downtime.
 - DNS. The switch is an nginx reload, so TTLs and cached answers are not part of this.
-- Moving the cron jobs. They stayed on `onprem1`, because the drill ends back there.
-- Decommissioning the old server.
+- A soak of a day or more. The drill's soaks were 13 minutes, so the nightly job could not run inside one: only the
+  inventory decisions covered it.
+- Deleting the old server. The drill stopped it.
 - Size. The database is 12 MB. Checksums read every row, which will not scale as it stands.
 
 Floci gaps: `rds.logical_replication` is ignored, so the drill used `ALTER SYSTEM`, and the admin is a superuser,

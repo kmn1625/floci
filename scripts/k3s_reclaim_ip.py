@@ -22,6 +22,8 @@ import sys
 import time
 from pathlib import Path
 
+LAB_PREFIXES = ("floci",)  # containers the emulators and these labs create; anything else belongs to someone else
+
 
 def sh(*args, check=True):
     r = subprocess.run(args, capture_output=True, text=True, check=False)
@@ -44,6 +46,35 @@ def pinned_ip(container, saved: Path):
     return found[0] if found else None  # the first registration is the one k3s keeps
 
 
+def fix_node_address(cluster: str, ip: str, seconds: int = 60) -> None:
+    """Point the Node's InternalIP back at *ip* while the API server answers (aws A-21 again, azure F-38).
+
+    A container that once booted on another address registered the Node with it. Back on its own address, k3s's
+    network policy controller looks for an interface with the Node's old IP and exits, a few seconds after the API
+    starts answering and after the node shows Ready. That window is enough to correct the Node.
+    """
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        out = subprocess.run(["docker", "exec", cluster, "kubectl", "get", "nodes", "-o", "json"],
+                             capture_output=True, text=True, check=False)
+        if out.returncode == 0:
+            for node in json.loads(out.stdout)["items"]:
+                name = node["metadata"]["name"]
+                addresses = node.get("status", {}).get("addresses", [])
+                i = next((n for n, a in enumerate(addresses) if a["type"] == "InternalIP"), None)
+                if i is None or addresses[i]["address"] == ip:
+                    continue
+                patch = json.dumps([{"op": "test", "path": f"/status/addresses/{i}/type", "value": "InternalIP"},
+                                    {"op": "replace", "path": f"/status/addresses/{i}/address", "value": ip}])
+                sh("docker", "exec", cluster, "kubectl", "patch", "node", name, "--subresource=status", "--type=json", "-p", patch,
+                   check=False)
+                sh("docker", "exec", cluster, "kubectl", "annotate", "node", name, "--overwrite",
+                   f"alpha.kubernetes.io/provided-node-ip={ip}", check=False)
+                print(f"k3s: node {name} still said {addresses[i]['address']}; set it back to {ip}")
+            return
+        time.sleep(0.25)
+
+
 def reclaim(prefix: str, saved: "Path | None" = None) -> bool:
     names = sh("docker", "ps", "-a", "--format", "{{.Names}}").split()
     cluster = next((n for n in names if n.startswith(prefix)), None)
@@ -62,6 +93,13 @@ def reclaim(prefix: str, saved: "Path | None" = None) -> bool:
         raise SystemExit(f"k3s: cannot tell which node IP {cluster} registered (no saved IP, nothing in its log)")
     holders, subnet = bridge()
     stopped = [name for name, ip in holders.items() if ip == want]
+    # Only the lab's own containers are stopped. On 10 Nov this stopped another session's short-lived test container,
+    # which was gone (--rm) by the time it would have been started again.
+    foreign = [name for name in stopped if not name.startswith(LAB_PREFIXES)]
+    if foreign:
+        print(f"k3s: {', '.join(foreign)} holds {want} and is not a lab container; not stopping it. "
+              f"Start {cluster} once it is gone, or stop it yourself if it is yours")
+        return False
     for name in stopped:
         print(f"k3s: {name} holds {want}; stopping it until {cluster} has its address back")
         sh("docker", "stop", name)
@@ -86,8 +124,14 @@ def reclaim(prefix: str, saved: "Path | None" = None) -> bool:
     if saved:
         saved.parent.mkdir(parents=True, exist_ok=True)
         saved.write_text(got)
+    fix_node_address(cluster, want)
     for _ in range(30):
         if " Ready" in sh("docker", "exec", cluster, "kubectl", "get", "nodes", "--no-headers", check=False):
+            # Ready is shown before the network policy controller starts, and that is where a wrong Node IP kills k3s.
+            time.sleep(20)
+            if sh("docker", "inspect", cluster, "--format", "{{.State.Running}}") != "true":
+                print(f"k3s: node showed Ready, then {cluster} exited; see `docker logs {cluster}`")
+                return False
             print("k3s: node Ready")
             return True
         time.sleep(5)
