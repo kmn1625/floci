@@ -5,6 +5,8 @@
 //	GET /readyz   readiness (503 while shutting down)
 //	GET /metrics  Prometheus metrics (metrics.go)
 //
+// Optional HTTPS listener, admin listener and overload protection: protect.go.
+//
 // Traces go to OTLP when OTEL_EXPORTER_OTLP_ENDPOINT is set; access logs are
 // JSON with trace_id (telemetry.go).
 //
@@ -16,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -66,22 +69,56 @@ func main() {
 		logger.Error("tracing disabled", "error", err.Error())
 	}
 
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           instrument(mux),
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      10 * time.Second,
-		IdleTimeout:       60 * time.Second,
+	public := limitInflight(envInt("MAX_INFLIGHT"), instrument(mux))
+	newServer := func(addr string, h http.Handler) *http.Server {
+		return &http.Server{
+			Addr:              addr,
+			Handler:           h,
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       10 * time.Second,
+			WriteTimeout:      10 * time.Second,
+			IdleTimeout:       60 * time.Second,
+		}
 	}
+	srv := newServer(addr, public)
+	servers := []*http.Server{srv}
+	serve := func(s *http.Server, run func() error) {
+		go func() {
+			logger.Info("listening", "version", version, "addr", s.Addr)
+			if err := run(); err != nil && err != http.ErrServerClosed {
+				logger.Error("server", "addr", s.Addr, "error", err.Error())
+				os.Exit(1)
+			}
+		}()
+	}
+	serve(srv, srv.ListenAndServe)
 
-	go func() {
-		logger.Info("listening", "version", version, "addr", addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("server", "error", err.Error())
+	if port := getenv("TLS_PORT", ""); port != "" {
+		cfg, err := newTLSConfig(getenv("TLS_CERT_FILE", ""), getenv("TLS_KEY_FILE", ""))
+		if err != nil {
+			logger.Error("tls", "error", err.Error())
 			os.Exit(1)
 		}
-	}()
+		ln, err := net.Listen("tcp", ":"+port)
+		if err != nil {
+			logger.Error("tls listen", "error", err.Error())
+			os.Exit(1)
+		}
+		tsrv := newServer(":"+port, public)
+		tsrv.ConnState = trackHandshake
+		servers = append(servers, tsrv)
+		serve(tsrv, func() error { return tsrv.Serve(&tlsListener{Listener: ln, cfg: cfg, max: envInt("MAX_HANDSHAKES")}) })
+	}
+
+	if port := getenv("ADMIN_PORT", ""); port != "" {
+		admin := http.NewServeMux()
+		for _, p := range []string{"GET /healthz", "GET /readyz", "GET /metrics"} {
+			admin.Handle(p, mux) // same handlers, no limits, no tracing or access log
+		}
+		asrv := newServer(":"+port, admin)
+		servers = append(servers, asrv)
+		serve(asrv, asrv.ListenAndServe)
+	}
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
@@ -89,8 +126,10 @@ func main() {
 	shuttingDown.Store(true)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		logger.Error("shutdown", "error", err.Error())
+	for _, s := range servers {
+		if err := s.Shutdown(ctx); err != nil {
+			logger.Error("shutdown", "addr", s.Addr, "error", err.Error())
+		}
 	}
 	_ = shutdownTracing(ctx) // flush buffered spans
 }

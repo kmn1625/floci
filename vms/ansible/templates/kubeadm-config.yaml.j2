@@ -16,6 +16,20 @@ apiServer:
   certSANs:
     - {{ ansible_host }}
     - {{ inventory_hostname }}
+# The defaults (15 s lease, 10 s renew deadline) are too tight for a 2-vCPU control plane on a busy
+# 4-core host: a lease renewal over 5 s made kube-controller-manager exit, its restart listed every
+# object again, and the load caused the next exit (64 restarts on 14 Nov 2026, outage drill finding O-03).
+# With one control plane there is nobody to fail over to, so waiting longer costs nothing.
+controllerManager:
+  extraArgs:
+    - {name: leader-elect-lease-duration, value: 60s}
+    - {name: leader-elect-renew-deadline, value: 40s}
+    - {name: leader-elect-retry-period, value: 5s}
+scheduler:
+  extraArgs:
+    - {name: leader-elect-lease-duration, value: 60s}
+    - {name: leader-elect-renew-deadline, value: 40s}
+    - {name: leader-elect-retry-period, value: 5s}
 ---
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration

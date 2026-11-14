@@ -8,9 +8,9 @@ metadata:
 spec:
   replicas: 2
   revisionHistoryLimit: 5
-  # Longer than the liveness window (10 s x 3): a pod that is Ready and then fails liveness never
+  # Longer than the liveness window (10 s x 6): a pod that is Ready and then fails liveness never
   # counts as available, so it cannot replace the old pods (deploy drill R3: 4 min outage without it)
-  minReadySeconds: 45
+  minReadySeconds: 70
   selector:
     matchLabels:
       app: hello-api
@@ -76,13 +76,19 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          # Liveness tolerates a busy pod: with the default 1 s timeout on the client port, the outage
+          # drill's backends were restarted into the backlog over and over (vms/drills/outage, O-01).
+          # hello-api 0.3.0 can serve the probes on ADMIN_PORT instead.
           livenessProbe:
             httpGet:
               path: /healthz
               port: http
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
           readinessProbe:
             httpGet:
               path: /readyz
               port: http
             periodSeconds: 5
+            timeoutSeconds: 2
