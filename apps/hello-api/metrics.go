@@ -77,6 +77,7 @@ func (m *registry) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(&b, "http_request_duration_seconds_bucket{route=%q,le=\"+Inf\"} %d\n", r, s.count)
 		fmt.Fprintf(&b, "http_request_duration_seconds_sum{route=%q} %g\nhttp_request_duration_seconds_count{route=%q} %d\n", r, s.sum, r, s.count)
 	}
+	writeProtectMetrics(&b)
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	_, _ = w.Write([]byte(b.String()))
 }
