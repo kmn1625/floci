@@ -8,8 +8,8 @@
   the host is 10.77.0.1 and the VMs get static addresses on a second NIC (k8s-cp1 .10, k8s-w1 .11,
   k8s-w2 .12, set by netplan in the VM). The Default Switch NIC stays for internet and multipass.
 
-  10.77.0.0/24 avoids the pod range (192.168.0.0/16), the Service range (10.96.0.0/12) and the
-  172.16.0.0/12 ranges Windows picks for the Default Switch and WSL.
+  10.77.0.0/24 avoids the pod range (10.244.0.0/16), the Service range (10.96.0.0/12) and the
+  172.16.0.0/12 and 192.168.0.0/16 ranges Windows picks for the Default Switch and WSL.
 
   Safe to re-run: existing pieces are kept.
 

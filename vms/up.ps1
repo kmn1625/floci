@@ -20,7 +20,7 @@
 #>
 param(
   [string]$Image = "24.04",
-  [string]$CpMemory = "2560M",
+  [string]$CpMemory = "4G",   # 2560M starved kube-controller-manager under load (DRILLS.md, 4 Nov)
   [string]$WorkerMemory = "2G",
   [int]$Cpus = 2,
   [string]$Disk = "15G",

@@ -74,21 +74,30 @@
         group: ubuntu
         mode: "0600"
 
-    # Calico (tigera operator) — the CNI that enforces NetworkPolicy. Since 3.30 the
-    # operator CRDs ship separately (operator-crds.yaml); server-side apply keeps
-    # re-runs idempotent and avoids the annotation size limit on large CRDs.
-    - name: Calico operator CRDs + operator
+    # Calico (tigera operator) — the CNI that enforces NetworkPolicy. On Kubernetes 1.36+ a new install
+    # uses native projectcalico.org/v3 CRDs (v3_projectcalico_org.yaml, operator CRDs included). Never
+    # add operator-crds.yaml too: that is the v1 crd.projectcalico.org set, and with both installed the
+    # operator and kube-apiserver fight over the v3 APIService (outage drill O-06, 14 Nov).
+    # Server-side apply keeps re-runs idempotent and avoids the annotation size limit on large CRDs.
+    - name: Calico v3 CRDs + operator
       ansible.builtin.command: >
         kubectl --kubeconfig /etc/kubernetes/admin.conf apply --server-side --force-conflicts -f
         https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/{{ item }}
-      loop: [operator-crds.yaml, tigera-operator.yaml]
+      loop: [v3_projectcalico_org.yaml, tigera-operator.yaml]
       changed_when: false
 
     - name: Calico CRDs established
       ansible.builtin.command: >
         kubectl --kubeconfig /etc/kubernetes/admin.conf wait --for=condition=Established --timeout=120s
-        crd/installations.operator.tigera.io crd/apiservers.operator.tigera.io
+        crd/installations.operator.tigera.io crd/apiservers.operator.tigera.io crd/ippools.projectcalico.org
       changed_when: false
+
+    - name: Only one Calico CRD set (no crd.projectcalico.org v1 CRDs)
+      ansible.builtin.shell: >
+        kubectl --kubeconfig /etc/kubernetes/admin.conf get crd -o name | grep -c '\.crd\.projectcalico\.org$' || true
+      register: calico_v1_crds
+      changed_when: false
+      failed_when: calico_v1_crds.stdout | int > 0
 
     - name: Calico installation (pod CIDR {{ pod_cidr }})
       ansible.builtin.template:
