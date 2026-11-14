@@ -8,7 +8,7 @@ resources:
 images:
   - name: hello-api
     newName: ghcr.io/kmn1625/hello-api
-    digest: sha256:59185d26561a019fd586209c1102a44ca931543c9cd8ce1d77d45376fde5afdf # 0.2.1 (Go and base image CVE fixes)
+    digest: sha256:4f8c4ee9984acdf6d0a8861263a96cf79920f4ea6ce9e6a27d6dd7ac1f64ec36 # 0.3.0 (overload protection, admin port)
 patches:
   - target:
       kind: Deployment
@@ -26,3 +26,21 @@ patches:
       - op: add
         path: /spec/template/spec/containers/0/env/-
         value: {name: OTEL_RESOURCE_ATTRIBUTES, value: "deployment.environment=kubeadm-lab"}
+      # 0.3.0 (vms/drills/outage): probes on a plain admin port, outside the request limit, so a busy
+      # pod is never restarted by its own liveness probe (devops-project §K021). Over 64 requests in
+      # flight the app answers 503 + Retry-After instead of queueing. /metrics stays on http as well.
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: {name: ADMIN_PORT, value: "8081"}
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: {name: MAX_INFLIGHT, value: "64"}
+      - op: add
+        path: /spec/template/spec/containers/0/ports/-
+        value: {name: admin, containerPort: 8081}
+      - op: replace
+        path: /spec/template/spec/containers/0/livenessProbe/httpGet/port
+        value: admin
+      - op: replace
+        path: /spec/template/spec/containers/0/readinessProbe/httpGet/port
+        value: admin
