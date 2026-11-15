@@ -48,9 +48,12 @@ runcmd:
   - systemctl restart containerd
   # Kubernetes 1.37 packages, held at 1.37.2 so nodes never drift apart
   - mkdir -p /etc/apt/keyrings
-  - curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.37/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+  # Key to a file first, with retries: a piped curl that fails mid-outage leaves an empty keyring, and a re-run's
+  # `gpg -o` then stops at an overwrite prompt with no tty, so apt calls the repo unsigned (15 Nov, w1).
+  - curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 -o /tmp/k8s-release.key https://pkgs.k8s.io/core:/stable:/v1.37/deb/Release.key
+  - gpg --batch --yes --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg /tmp/k8s-release.key
   - echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.37/deb/ /' > /etc/apt/sources.list.d/kubernetes.list
-  - apt-get update
-  - apt-get install -y kubelet=1.37.2-1.1 kubeadm=1.37.2-1.1 kubectl=1.37.2-1.1
+  - apt-get -o Acquire::Retries=5 update
+  - apt-get -o Acquire::Retries=5 install -y kubelet=1.37.2-1.1 kubeadm=1.37.2-1.1 kubectl=1.37.2-1.1
   - apt-mark hold kubelet kubeadm kubectl
   - systemctl enable --now kubelet
