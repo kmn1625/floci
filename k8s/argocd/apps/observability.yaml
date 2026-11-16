@@ -1,77 +1,10 @@
 # Observability stack, synced by Argo CD from the upstream Helm charts (pinned).
-#   metrics: kube-prometheus-stack (Prometheus, Alertmanager, Grafana, node-exporter, kube-state-metrics)
 #   logs:    Loki (single binary) <- Grafana Alloy (reads pod logs through the Kubernetes API)
 #   traces:  Tempo (monolithic)   <- apps send OTLP/HTTP to tempo.observability:4318
+#   metrics: off by default. kube-prometheus-stack (Prometheus, Grafana, ...) is in
+#            k8s/argocd/optional/metrics.yaml: on 2 vCPU / 2 GB workers it starved the nodes
+#            (liveness kills, NotReady workers, 16 Nov). Turn on: kubectl apply -f that file.
 # Lab sizing: no persistent volumes (emptyDir), short retention.
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: kube-prometheus-stack
-  namespace: argocd
-  annotations:
-    argocd.argoproj.io/sync-wave: "1"
-spec:
-  project: default
-  source:
-    repoURL: https://prometheus-community.github.io/helm-charts
-    chart: kube-prometheus-stack
-    targetRevision: 92.16.1
-    helm:
-      releaseName: kps
-      valuesObject:
-        fullnameOverride: kps
-        # kubeadm binds these to 127.0.0.1 on the nodes: scraping them only shows DOWN targets.
-        kubeEtcd: {enabled: false}
-        kubeControllerManager: {enabled: false}
-        kubeScheduler: {enabled: false}
-        kubeProxy: {enabled: false}
-        alertmanager:
-          alertmanagerSpec:
-            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 64Mi}}
-        prometheus:
-          prometheusSpec:
-            retention: 2d
-            # pick up ServiceMonitors/PodMonitors from every namespace, not only this release's
-            serviceMonitorSelectorNilUsesHelmValues: false
-            podMonitorSelectorNilUsesHelmValues: false
-            ruleSelectorNilUsesHelmValues: false
-            resources: {requests: {cpu: 100m, memory: 400Mi}, limits: {memory: 900Mi}}
-        prometheusOperator:
-          resources: {requests: {cpu: 20m, memory: 64Mi}, limits: {memory: 128Mi}}
-        kube-state-metrics:
-          resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 96Mi}}
-        prometheus-node-exporter:
-          resources: {requests: {cpu: 10m, memory: 24Mi}, limits: {memory: 48Mi}}
-        grafana:
-          adminPassword: ""  # chart generates a random one into the kps-grafana secret
-          resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {memory: 256Mi}}
-          additionalDataSources:
-            - name: Loki
-              uid: loki
-              type: loki
-              url: http://loki.observability:3100
-              jsonData:
-                derivedFields:
-                  - name: trace_id
-                    matcherRegex: '"trace_id":"(\w+)"'
-                    datasourceUid: tempo
-                    url: "$${__value.raw}"
-            - name: Tempo
-              uid: tempo
-              type: tempo
-              url: http://tempo.observability:3200
-              jsonData:
-                tracesToLogsV2:
-                  datasourceUid: loki
-                  filterByTraceID: true
-                serviceMap: {datasourceUid: prometheus}
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: observability
-  syncPolicy:
-    automated: {prune: true, selfHeal: true}
-    syncOptions: [ServerSideApply=true]  # the operator CRDs exceed the client-side annotation limit
----
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -156,26 +89,6 @@ spec:
   syncPolicy:
     automated: {prune: true, selfHeal: true}
     syncOptions: [ServerSideApply=true]
----
-# Dashboards as code (k8s/observability/dashboards): ConfigMaps the Grafana sidecar loads.
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: dashboards
-  namespace: argocd
-  annotations:
-    argocd.argoproj.io/sync-wave: "2"
-spec:
-  project: default
-  source:
-    repoURL: https://github.com/kmn1625/floci.git
-    targetRevision: main
-    path: k8s/observability/dashboards
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: observability
-  syncPolicy:
-    automated: {prune: true, selfHeal: true}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
