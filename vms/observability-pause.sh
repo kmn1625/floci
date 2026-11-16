@@ -25,7 +25,7 @@ case "${1:-}" in
     kubectl -n "$NS" patch prometheus kps-prometheus --type merge -p '{"spec":{"replicas":0}}' >/dev/null 2>&1 || true
     kubectl -n "$NS" patch alertmanager kps-alertmanager --type merge -p '{"spec":{"replicas":0}}' >/dev/null 2>&1 || true
     kubectl -n "$NS" patch daemonset kps-prometheus-node-exporter --type merge \
-      -p '{"spec":{"template":{"spec":{"nodeSelector":{"floci-lab/paused":"true"}}}}}' >/dev/null
+      -p '{"spec":{"template":{"spec":{"nodeSelector":{"floci-lab/paused":"true"}}}}}' >/dev/null 2>&1 || true  # absent when metrics are off
     kubectl -n "$NS" scale deployment --all --replicas=0 >/dev/null
     kubectl -n "$NS" scale statefulset loki tempo --replicas=0 >/dev/null
     ;;

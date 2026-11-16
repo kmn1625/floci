@@ -1,0 +1,115 @@
+# Metrics for the kubeadm lab, OFF by default: the root app syncs k8s/argocd/apps only, not this folder.
+# On 2 vCPU / 2 GB workers kube-prometheus-stack starved the nodes (16 Nov: liveness kills of Prometheus,
+# Grafana, typha; both workers NotReady). Give the workers more CPU and memory first, then:
+#   kubectl apply -f k8s/argocd/optional/metrics.yaml      # on; run it again once the stack is up: the
+#                                                          # ServiceMonitor needs the CRD the chart installs
+#   kubectl delete -f k8s/argocd/optional/metrics.yaml     # off (the finalizer removes what each app installed)
+# Grafana: kubectl -n observability port-forward svc/kps-grafana 3000:80, user admin,
+#          password: kubectl -n observability get secret kps-grafana -o jsonpath='{.data.admin-password}'
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  finalizers: [resources-finalizer.argocd.argoproj.io]  # removing the app removes its resources
+  name: kube-prometheus-stack
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 92.16.1
+    helm:
+      releaseName: kps
+      valuesObject:
+        fullnameOverride: kps
+        # kubeadm binds these to 127.0.0.1 on the nodes: scraping them only shows DOWN targets.
+        kubeEtcd: {enabled: false}
+        kubeControllerManager: {enabled: false}
+        kubeScheduler: {enabled: false}
+        kubeProxy: {enabled: false}
+        alertmanager:
+          alertmanagerSpec:
+            resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 64Mi}}
+        prometheus:
+          prometheusSpec:
+            retention: 2d
+            # pick up ServiceMonitors/PodMonitors from every namespace, not only this release's
+            serviceMonitorSelectorNilUsesHelmValues: false
+            podMonitorSelectorNilUsesHelmValues: false
+            ruleSelectorNilUsesHelmValues: false
+            resources: {requests: {cpu: 100m, memory: 400Mi}, limits: {memory: 900Mi}}
+        prometheusOperator:
+          resources: {requests: {cpu: 20m, memory: 64Mi}, limits: {memory: 128Mi}}
+        kube-state-metrics:
+          resources: {requests: {cpu: 10m, memory: 32Mi}, limits: {memory: 96Mi}}
+        prometheus-node-exporter:
+          resources: {requests: {cpu: 10m, memory: 24Mi}, limits: {memory: 48Mi}}
+        grafana:
+          adminPassword: ""  # chart generates a random one into the kps-grafana secret
+          resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {memory: 256Mi}}
+          additionalDataSources:
+            - name: Loki
+              uid: loki
+              type: loki
+              url: http://loki.observability:3100
+              jsonData:
+                derivedFields:
+                  - name: trace_id
+                    matcherRegex: '"trace_id":"(\w+)"'
+                    datasourceUid: tempo
+                    url: "$${__value.raw}"
+            - name: Tempo
+              uid: tempo
+              type: tempo
+              url: http://tempo.observability:3200
+              jsonData:
+                tracesToLogsV2:
+                  datasourceUid: loki
+                  filterByTraceID: true
+                serviceMap: {datasourceUid: prometheus}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [ServerSideApply=true]  # the operator CRDs exceed the client-side annotation limit
+---
+# Dashboards as code (k8s/observability/dashboards): ConfigMaps the Grafana sidecar loads.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  finalizers: [resources-finalizer.argocd.argoproj.io]  # removing the app removes its resources
+  name: dashboards
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kmn1625/floci.git
+    targetRevision: main
+    path: k8s/observability/dashboards
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: hello-api
+  namespace: hello
+  annotations:
+    # the CRD arrives with kube-prometheus-stack; don't fail the dry run before it exists
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  selector:
+    matchLabels:
+      app: hello-api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s

@@ -81,9 +81,11 @@ them: [vms/DRILLS.md](vms/DRILLS.md).
 
 ## Observability (on the kubeadm cluster)
 
-Argo CD installs from pinned Helm charts (`k8s/argocd/apps/observability.yaml`): kube-prometheus-stack 92.16.1
-(Prometheus, Alertmanager, Grafana, node-exporter, kube-state-metrics), Loki 7.5.0, Tempo 1.24.4 and Grafana
-Alloy 1.15.0 (pod logs through the Kubernetes API). `hello-api` 0.2.0 exposes `/metrics`, sends OpenTelemetry
+Argo CD installs from pinned Helm charts (`k8s/argocd/apps/observability.yaml`): Loki 7.5.0, Tempo 1.24.4 and
+Grafana Alloy 1.15.0 (pod logs through the Kubernetes API). Metrics are off by default: kube-prometheus-stack
+92.16.1 (Prometheus, Alertmanager, Grafana, node-exporter, kube-state-metrics) starved the 2 vCPU / 2 GB workers
+on 16 Nov, so it lives in `k8s/argocd/optional/metrics.yaml`; turn it on with `kubectl apply -f` on that file
+after giving the workers more CPU and memory (Grafana below needs it). `hello-api` 0.2.0 exposes `/metrics`, sends OpenTelemetry
 traces to Tempo and writes JSON logs with `trace_id`, so Grafana jumps from a log line to its trace.
 
 ```powershell
