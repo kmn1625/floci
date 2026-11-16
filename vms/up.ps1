@@ -20,12 +20,13 @@
 #>
 param(
   [string]$Image = "24.04",
-  [string]$CpMemory = "2560M",
+  [string]$CpMemory = "4G",   # 2560M starved kube-controller-manager under load (DRILLS.md, 4 Nov)
   [string]$WorkerMemory = "2G",
   [int]$Cpus = 2,
   [string]$Disk = "15G",
   [string[]]$Workers = @("k8s-w1", "k8s-w2"),
   [string]$Switch = "k8s-lab",
+  [int]$LaunchTimeout = 2400,   # cloud-init's apt installs took over 20 min on a slow Ubuntu mirror (15 Nov)
   [string]$IpPrefix = "10.77.0."
 )
 $ErrorActionPreference = "Stop"
@@ -58,15 +59,48 @@ $existing = (& $mp list --format json | ConvertFrom-Json).list.name
 $nodes = @(@{ name = $cp; mem = $CpMemory }) + ($Workers | ForEach-Object { @{ name = $_; mem = $WorkerMemory } })
 $i = 10
 foreach ($n in $nodes) { $n.ip = "$IpPrefix$i"; $n.mac = "52:54:00:77:00:{0:x2}" -f $i; $i++ }
+# Static address on the k8s-lab NIC, matched by MAC; no gateway, internet stays on the Default Switch NIC.
+# The netplan file takes effect at boot; the live address is added with `ip addr add`. Never `netplan apply` here:
+# it re-DHCPs eth0, the link `multipass exec` runs over, and on 15 Nov the exec client then spun a host core for 8 h.
+# Runs for kept VMs too, so a re-run repairs a node that lost or never got its address.
+function Set-LabAddress($n) {
+  $sh = @"
+set -e
+iface=`$(ip -o link | awk -v m='$($n.mac)' '`$0 ~ m { sub(":", "", `$2); print `$2; exit }')
+[ -n "`$iface" ] || { echo 'no NIC with MAC $($n.mac)' >&2; exit 1; }
+install -m 600 /dev/stdin /etc/netplan/60-k8s-lab.yaml <<'NETPLAN'
+network:
+  version: 2
+  ethernets:
+    k8s-lab:
+      match:
+        macaddress: "$($n.mac)"
+      addresses: [$($n.ip)/24]
+      dhcp4: false
+      dhcp6: false
+      link-local: []
+NETPLAN
+ip link set "`$iface" up
+ip -4 -o addr show dev "`$iface" | grep -q ' $($n.ip)/24 ' || ip addr add $($n.ip)/24 dev "`$iface"
+"@
+  $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($sh.Replace("`r`n", "`n")))
+  $p = Start-Process -FilePath $mp -NoNewWindow -PassThru `
+         -ArgumentList "exec $($n.name) -- sudo bash -c `"echo $b64 | base64 -d | bash`""
+  $null = $p.Handle   # without the cached handle, Windows PowerShell 5.1 leaves ExitCode empty
+  if (-not $p.WaitForExit(120000)) { $p.Kill(); throw "$($n.name): setting $($n.ip) timed out after 120 s" }
+  if ($p.ExitCode -ne 0) { throw "$($n.name): setting $($n.ip) failed ($($p.ExitCode))" }
+  Write-Host "[addr]   $($n.name) $($n.ip)"
+}
 foreach ($n in $nodes) {
-  if ($existing -contains $n.name) { Write-Host "[keep]   $($n.name)"; continue }
-  Write-Host "[launch] $($n.name) ($Cpus CPU, $($n.mem), $Disk, $($n.ip))"
-  Invoke-Multipass launch $Image --name $n.name --cpus $Cpus --memory $n.mem --disk $Disk --cloud-init $cloudInit `
-    --network "name=$Switch,mode=manual,mac=$($n.mac)" --timeout 1200
-  # Static address on the k8s-lab NIC, matched by MAC; no gateway, internet stays on the Default Switch NIC.
-  $netplan = "network:`n  version: 2`n  ethernets:`n    k8s-lab:`n      match:`n        macaddress: `"$($n.mac)`"`n" +
-             "      addresses: [$($n.ip)/24]`n      dhcp4: false`n      dhcp6: false`n      link-local: []`n"
-  Invoke-Multipass exec $n.name '--' sudo bash -c "printf '%s' '$netplan' > /etc/netplan/60-k8s-lab.yaml && chmod 600 /etc/netplan/60-k8s-lab.yaml && netplan apply"
+  if ($existing -contains $n.name) {
+    Write-Host "[keep]   $($n.name)"
+    Invoke-Multipass start $n.name
+  } else {
+    Write-Host "[launch] $($n.name) ($Cpus CPU, $($n.mem), $Disk, $($n.ip))"
+    Invoke-Multipass launch $Image --name $n.name --cpus $Cpus --memory $n.mem --disk $Disk --cloud-init $cloudInit `
+      --network "name=$Switch,mode=manual,mac=$($n.mac)" --timeout $LaunchTimeout
+  }
+  Set-LabAddress $n
 }
 function ip($name) { ($nodes | Where-Object { $_.name -eq $name }).ip }
 
@@ -77,6 +111,8 @@ $inventory = Join-Path $keys "inventory.ini"
 $inv -join "`n" | Set-Content -NoNewline -Encoding ascii $inventory
 Write-Host ("[nodes]  " + (($nodes | ForEach-Object { "$($_.name)=$(ip $_.name)" }) -join "  "))
 
+# A kept VM may still be in cloud-init (a launch that hit -LaunchTimeout keeps installing); Ansible needs it finished.
+foreach ($w in $Workers) { Invoke-Multipass exec $w '--' bash -c "cloud-init status --wait >/dev/null; command -v kubeadm >/dev/null" }
 Invoke-Multipass exec $cp '--' bash -c "cloud-init status --wait >/dev/null; command -v ansible-playbook >/dev/null || sudo apt-get install -y -qq ansible-core >/dev/null"
 Invoke-Multipass exec $cp '--' bash -c "rm -rf ~/lab && mkdir -p ~/lab ~/.ssh"
 Invoke-Multipass transfer --recursive (Join-Path $here "ansible") "${cp}:lab/"
@@ -92,7 +128,13 @@ try {
 
 # 4. kubeconfig for the host --------------------------------------------------
 $kc = Join-Path $keys "kubeconfig"
-& $mp exec $cp -- sudo cat /etc/kubernetes/admin.conf | Set-Content -Encoding ascii $kc
+# A file copy, not `exec sudo cat | Set-Content`: that pipe hung with the exec client spinning a core (15 Nov, twice).
+Invoke-Multipass exec $cp '--' sudo install -m 600 -o ubuntu /etc/kubernetes/admin.conf /home/ubuntu/admin.conf
+# On Windows transfer exits 2 after a good copy ("cannot set permissions for local file"), so check the file instead.
+if (Test-Path $kc) { Remove-Item $kc }
+try { & $mp transfer "${cp}:/home/ubuntu/admin.conf" $kc 2>$null }
+finally { & $mp exec $cp -- rm -f /home/ubuntu/admin.conf }
+if (-not (Test-Path $kc) -or -not (Select-String -Quiet -Path $kc -Pattern '^kind: Config')) { throw "kubeconfig copy from $cp failed" }
 Write-Host ""
 Write-Host "Cluster ready. kubectl --kubeconfig `"$kc`" get nodes"
 Write-Host "Argo CD:  kubectl --kubeconfig `"$kc`" -n argocd port-forward svc/argocd-server 8443:443"
