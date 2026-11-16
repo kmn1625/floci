@@ -128,7 +128,13 @@ try {
 
 # 4. kubeconfig for the host --------------------------------------------------
 $kc = Join-Path $keys "kubeconfig"
-& $mp exec $cp -- sudo cat /etc/kubernetes/admin.conf | Set-Content -Encoding ascii $kc
+# A file copy, not `exec sudo cat | Set-Content`: that pipe hung with the exec client spinning a core (15 Nov, twice).
+Invoke-Multipass exec $cp '--' sudo install -m 600 -o ubuntu /etc/kubernetes/admin.conf /home/ubuntu/admin.conf
+# On Windows transfer exits 2 after a good copy ("cannot set permissions for local file"), so check the file instead.
+if (Test-Path $kc) { Remove-Item $kc }
+try { & $mp transfer "${cp}:/home/ubuntu/admin.conf" $kc 2>$null }
+finally { & $mp exec $cp -- rm -f /home/ubuntu/admin.conf }
+if (-not (Test-Path $kc) -or -not (Select-String -Quiet -Path $kc -Pattern '^kind: Config')) { throw "kubeconfig copy from $cp failed" }
 Write-Host ""
 Write-Host "Cluster ready. kubectl --kubeconfig `"$kc`" get nodes"
 Write-Host "Argo CD:  kubectl --kubeconfig `"$kc`" -n argocd port-forward svc/argocd-server 8443:443"
